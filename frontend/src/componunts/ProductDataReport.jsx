@@ -82,11 +82,11 @@ const StarRating = ({ value }) => {
 export default function ProductDataReport() {
   const navigate = useNavigate();
 
-  // Navigation & Filtering States
-  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, top-selling, mapped-categories, unmapped-categories, unmapped-products
-  const [marketplaceFilter, setMarketplaceFilter] = useState("All");
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  // Navigation & Filtering States Persisted in LocalStorage
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem("activeTab") || "dashboard");
+  const [marketplaceFilter, setMarketplaceFilter] = useState(() => localStorage.getItem("marketplaceFilter") || "All");
+  const [categoryFilter, setCategoryFilter] = useState(() => localStorage.getItem("categoryFilter") || "");
+  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem("statusFilter") || "All");
   const [searchQuery, setSearchQuery] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
 
@@ -123,6 +123,56 @@ export default function ProductDataReport() {
 
   const statusList = ["All", "Mapped", "Unmapped", "Completed", "Pending"];
 
+  // Sync state changes to localStorage to persist selections on browser reloads
+  useEffect(() => {
+    localStorage.setItem("activeTab", activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem("marketplaceFilter", marketplaceFilter);
+  }, [marketplaceFilter]);
+
+  useEffect(() => {
+    localStorage.setItem("categoryFilter", categoryFilter);
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    localStorage.setItem("statusFilter", statusFilter);
+  }, [statusFilter]);
+
+  // Two-way synchronization between Status Filter dropdown and Active Tabs
+  useEffect(() => {
+    if (statusFilter === "Mapped" || statusFilter === "Completed") {
+      if (activeTab !== "mapped-categories") {
+        setActiveTab("mapped-categories");
+      }
+    } else if (statusFilter === "Unmapped" || statusFilter === "Pending") {
+      if (activeTab !== "unmapped-categories" && activeTab !== "unmapped-products") {
+        setActiveTab("unmapped-categories");
+      }
+    } else if (statusFilter === "All") {
+      if (activeTab !== "dashboard" && activeTab !== "top-selling") {
+        setActiveTab("dashboard");
+      }
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    if (activeTab === "mapped-categories") {
+      if (statusFilter !== "Mapped" && statusFilter !== "Completed") {
+        setStatusFilter("Mapped");
+      }
+    } else if (activeTab === "unmapped-categories" || activeTab === "unmapped-products") {
+      if (statusFilter !== "Unmapped" && statusFilter !== "Pending") {
+        setStatusFilter("Unmapped");
+      }
+    } else if (activeTab === "dashboard" || activeTab === "top-selling") {
+      if (statusFilter !== "All") {
+        setStatusFilter("All");
+      }
+    }
+  }, [activeTab]);
+
   // Fetch Summary & Charts Data
   const fetchSummaryAndOverview = async () => {
     try {
@@ -148,7 +198,6 @@ export default function ProductDataReport() {
       const searchParam = appliedSearch ? encodeURIComponent(appliedSearch) : "";
 
       if (activeTab === "dashboard") {
-        // Dashboard aggregates its own top products
         const topRes = await api.get(`/product-report/top-products?marketplace=${marketParam}&limit=10`);
         setTopProducts(topRes.data?.data || []);
       } else if (activeTab === "top-selling") {
@@ -190,18 +239,17 @@ export default function ProductDataReport() {
     setAppliedSearch(searchQuery);
   };
 
-  // Trigger manual refresh
+  // Trigger manual refresh & native browser reload to completely refresh states
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       const marketParam = marketplaceFilter === "All" ? "all" : marketplaceFilter;
       await api.post(`/product-report/refresh?marketplace=${marketParam}`);
-      await fetchSummaryAndOverview();
-      await fetchTabContent();
     } catch (e) {
-      console.error(e);
+      console.error("Refresh API error", e);
     } finally {
       setRefreshing(false);
+      window.location.reload(); // Hard reload the browser window as expected
     }
   };
 
