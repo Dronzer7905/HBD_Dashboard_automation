@@ -310,8 +310,25 @@ def get_mapped_categories():
             """
             params = {}
             if marketplace and marketplace.lower() != 'all':
-                query_str += " AND LOWER(marketplace_name) = LOWER(:marketplace)"
+                query_str = """
+                    SELECT 
+                        id, 
+                        marketplace_name, 
+                        category_name, 
+                        subcategory_name, 
+                        child_category_name, 
+                        category_level, 
+                        category_path
+                    FROM product_category_master
+                    WHERE id NOT IN (
+                        SELECT category_id FROM pending_category_report 
+                        WHERE category_id IS NOT NULL
+                          AND LOWER(marketplace_name) = LOWER(:marketplace)
+                    )
+                    AND LOWER(marketplace_name) = LOWER(:marketplace)
+                """
                 params["marketplace"] = marketplace
+                
             if search:
                 query_str += " AND (category_name LIKE :search OR subcategory_name LIKE :search OR category_path LIKE :search)"
                 params["search"] = f"%{search}%"
