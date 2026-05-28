@@ -2,28 +2,34 @@ from extensions import db
 
 class Blinkit(db.Model):
     __tablename__ = 'blinkit'
-    id = db.Column(db.Integer, primary_key=True)
-    product = db.Column(db.String(255))
+
+    product_id = db.Column(db.BigInteger, primary_key=True)
+    product_name = db.Column(db.Text)
+    brand = db.Column(db.String(255))
     category = db.Column(db.String(255))
     sub_category = db.Column(db.String(255))
-    brand = db.Column(db.String(255))
-    sale_price = db.Column(db.String(50))
-    market_price = db.Column(db.String(50))
-    type = db.Column(db.String(100))
-    rating = db.Column(db.String(50))
-    description = db.Column(db.Text)
+    price = db.Column(db.Numeric(10, 2))
+    mrp = db.Column(db.Numeric(10, 2))
+    discount = db.Column(db.Numeric(10, 2))
+    quantity = db.Column(db.String(100))
+    availability = db.Column(db.Boolean)
+    image_url = db.Column(db.Text)
+    product_url = db.Column(db.Text)
 
     def to_dict(self):
         return {
-            "id": self.id,
-            "name": self.product,
+            "product_id": self.product_id,
+            "product_name": self.product_name,
+            "brand": self.brand,
             "category": self.category,
             "sub_category": self.sub_category,
-            "brand": self.brand,
-            "sale_price": self.sale_price,
-            "market_price": self.market_price,
-            "rating": self.rating,
-            "description": self.description
+            "price": float(self.price) if self.price else 0,
+            "mrp": float(self.mrp) if self.mrp else 0,
+            "discount": float(self.discount) if self.discount else 0,
+            "quantity": self.quantity,
+            "availability": bool(self.availability),
+            "image_url": self.image_url,
+            "product_url": self.product_url
         }
 
 class DMart(db.Model):
