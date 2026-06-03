@@ -23,7 +23,6 @@ from typing import Optional
 from services.scrapers.dmart_engine.scraper import DMartScraper
 from services.scrapers.dmart_engine.database import DatabaseManager
 from services.scrapers.dmart_engine.config import DB_PATH, SCHEMA_PATH, EXPORT_DIR
-from services.scrapers.dmart_engine.sitemap_runner import SitemapRunner
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +30,23 @@ logger = logging.getLogger(__name__)
 def scrape_dmart_search(
     search_term: str,
     mode: str = "category",
-    pincodes: str = "400001",
+    pincodes: str = "all",
     max_categories: Optional[int] = None,
-    task_id: Optional[int] = None
+    task_id: Optional[int] = None,
+    categories: Optional[str] = None
 ):
     """
     Celery-compatible entry point for the DMart scraper.
 
     Modes:
         category — Infinite scroll PLP scraping (default)
-        sitemap  — PDP scraping via XML sitemap
-        hybrid   — Category scrape + sitemap fill for missing descriptions
 
     After each pincode's scrape completes, all products in SQLite
     (dmart_product_master) are synced to MySQL (dmart_products table).
     """
+    # Force Category mode exclusively as sitemaps and hybrid approaches are deprecated
+    mode = "category"
+
     from app import app
     from extensions import db
     from model.product_model.additional_products import DMart, DMartCategory
@@ -66,13 +67,17 @@ def scrape_dmart_search(
                 logger.warning(f"Failed to fetch/initialize ScraperTask in start: {e}")
 
         # ── Parse pincode list ──
-        if str(pincodes).strip().lower() == "all":
+        if str(pincodes).strip().lower() == "all" or not pincodes:
             from services.scrapers.dmart_engine.config import PINCODE_LIST
             pincode_list = PINCODE_LIST
         else:
             pincode_list = [p.strip() for p in str(pincodes).split(",") if p.strip()]
 
         limit = int(max_categories) if max_categories else None
+        
+        # ── Parse categories list ──
+        categories_list = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
+
 
         logger.info(
             f"=== DMart Scraper START | mode={mode} | "
@@ -82,11 +87,12 @@ def scrape_dmart_search(
         for idx, pin in enumerate(pincode_list, 1):
             logger.info(f"[{idx}/{len(pincode_list)}] Running scrape for pincode: {pin}")
 
-            if task:
+            if task_id:
                 try:
-                    db.session.refresh(task)
-                    task.status = f"Pincode {pin} ({idx}/{len(pincode_list)}): Initializing browser..."
-                    db.session.commit()
+                    active_task = ScraperTask.query.get(task_id)
+                    if active_task:
+                        active_task.status = f"Pincode {pin} ({idx}/{len(pincode_list)}): Initializing browser..."
+                        db.session.commit()
                 except Exception:
                     pass
 
@@ -150,7 +156,6 @@ def scrape_dmart_search(
                     category_name = product.get('category_name') or "Uncategorized"
                     product_url = product.get('product_url')
                     image_url = product.get('image_url')
-                    description = product.get('description')
 
                     price_str = str(dmart_price) if dmart_price is not None else "0.0"
                     mrp_str = str(mrp) if mrp is not None else "0.0"
@@ -161,31 +166,33 @@ def scrape_dmart_search(
                         try:
                             existing = DMart.query.filter_by(asin=sku_id).first()
                             if existing:
-                                existing.title       = product_name
-                                existing.imgUrl      = image_url
-                                existing.productUrl  = product_url
+                                existing.title       = product_name or existing.title
+                                if image_url:
+                                    existing.imgUrl  = image_url
+                                existing.productUrl  = product_url or existing.productUrl
                                 existing.price       = price_str
                                 existing.listPrice   = mrp_str
-                                existing.categoryName = category_name
-                                existing.brand       = brand
-                                existing.description = description
-                                existing.category_id = category_id
-                                existing.quantity    = pack_size
+                                # Defensively avoid overwriting categories with Uncategorized or null
+                                if category_name and category_name not in ("Uncategorized", "null"):
+                                    existing.categoryName = category_name
+                                if category_id:
+                                    existing.category_id = category_id
+                                existing.brand       = brand or existing.brand
+                                existing.quantity    = pack_size or existing.quantity
+                                existing.availability = availability
                             else:
                                 new_product = DMart(
                                     asin         = sku_id,
                                     title        = product_name,
                                     imgUrl       = image_url,
                                     productUrl   = product_url,
-                                    stars        = "0.0",
-                                    reviews      = "0",
                                     price        = price_str,
                                     listPrice    = mrp_str,
                                     categoryName = category_name,
                                     brand        = brand,
-                                    description  = description,
                                     category_id  = category_id,
-                                    quantity     = pack_size
+                                    quantity     = pack_size,
+                                    availability = availability
                                 )
                                 db.session.add(new_product)
                             
@@ -203,22 +210,23 @@ def scrape_dmart_search(
                             import time
                             time.sleep(2)
 
-                    # Update ScraperTask status and progress
-                    if task:
+                    # Update ScraperTask status and progress dynamically via query to prevent detached session error
+                    if task_id:
                         max_task_retries = 3
                         for task_attempt in range(1, max_task_retries + 1):
                             try:
-                                db.session.refresh(task)
-                                task.total_found = task.total_found + 1
-                                
-                                # Estimate progress based on found products
-                                estimated_prog = min(99, int((task.total_found / (limit * len(pincode_list) if limit else 300)) * 100))
-                                task.progress = max(task.progress, estimated_prog)
-                                
-                                cat_lbl = category_name or "products"
-                                task.status = f"Pincode {pin} ({idx}/{len(pincode_list)}): Scraped {task.total_found} products (last: {cat_lbl})"
-                                db.session.commit()
-                                break  # Success
+                                active_task = ScraperTask.query.get(task_id)
+                                if active_task:
+                                    active_task.total_found = active_task.total_found + 1
+                                    
+                                    # Estimate progress based on found products
+                                    estimated_prog = min(99, int((active_task.total_found / (limit * len(pincode_list) if limit else 300)) * 100))
+                                    active_task.progress = max(active_task.progress, estimated_prog)
+                                    
+                                    cat_lbl = category_name or "products"
+                                    active_task.status = f"Pincode {pin} ({idx}/{len(pincode_list)}): Scraped {active_task.total_found} products (last: {cat_lbl})"
+                                    db.session.commit()
+                                    break  # Success
                             except Exception as t_err:
                                 db.session.rollback()
                                 db.session.remove()  # Crucial: discard dead connection context
@@ -236,50 +244,28 @@ def scrape_dmart_search(
             sqlite_db.on_product_saved = on_product_saved_callback
             sqlite_db.connect()
 
+            # Record run start time in UTC to match SQLite's CURRENT_TIMESTAMP
+            import datetime
+            # Buffer by 5 minutes to avoid clock discrepancies
+            run_start_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
+
             try:
                 # Count products already in SQLite before this run
                 products_before = sqlite_db.get_product_count()
 
-                # ── Mode: Category Infinite Scroll ──
-                if mode in ("category", "hybrid"):
-                    logger.info(f"Stage 1: Category PLP scrape for pincode {pin}...")
+                # ── Category Infinite Scroll Scrape ──
+                logger.info(f"Category PLP scrape for pincode {pin}...")
 
-                    async def _run_category():
-                        async with DMartScraper(sqlite_db, pincode=pin) as scraper:
-                            await scraper.run(max_categories=limit)
+                async def _run_category():
+                    async with DMartScraper(sqlite_db, pincode=pin) as scraper:
+                        await scraper.run(max_categories=limit, categories_to_scrape=categories_list)
 
-                    asyncio.run(_run_category())
-                    products_after_cat = sqlite_db.get_product_count()
-                    logger.info(
-                        f"Category scrape done. SQLite: {products_before} → {products_after_cat} "
-                        f"(+{products_after_cat - products_before} new products)"
-                    )
-
-                # ── Mode: Sitemap PDP Scraping ──
-                if mode == "sitemap":
-                    sitemap_limit = int(search_term) if str(search_term).isdigit() else 50
-                    logger.info(f"Sitemap mode: scraping {sitemap_limit} PDPs for pincode {pin}...")
-                    runner = SitemapRunner(sqlite_db, pincode=pin)
-                    asyncio.run(runner.run(limit=sitemap_limit))
-
-                # ── Mode: Hybrid Stage 2 — fill missing descriptions ──
-                if mode == "hybrid":
-                    try:
-                        missing_urls = sqlite_db.get_products_missing_descriptions()
-                        if missing_urls:
-                            logger.info(
-                                f"Hybrid Stage 2: filling descriptions for "
-                                f"{len(missing_urls)} products..."
-                            )
-                            runner = SitemapRunner(sqlite_db, pincode=pin)
-                            asyncio.run(runner.run(
-                                limit=len(missing_urls),
-                                custom_urls=missing_urls
-                            ))
-                        else:
-                            logger.info("Hybrid Stage 2: no missing descriptions. Skipping.")
-                    except Exception as e:
-                        logger.error(f"Hybrid Stage 2 failed: {e}")
+                asyncio.run(_run_category())
+                products_after_cat = sqlite_db.get_product_count()
+                logger.info(
+                    f"Category scrape done. SQLite: {products_before} → {products_after_cat} "
+                    f"(+{products_after_cat - products_before} new products)"
+                )
 
                 # ── Read categories from SQLite → Sync to MySQL (Double-safety fallback) ──
                 logger.info("Syncing categories from SQLite → MySQL...")
@@ -324,23 +310,25 @@ def scrape_dmart_search(
                         time.sleep(3)
 
                 # ── Read new products from SQLite → Sync to MySQL (Double-safety fallback) ──
-                logger.info("Reading products from SQLite for MySQL sync...")
+                logger.info(f"Reading products from SQLite modified since {run_start_time} for MySQL sync...")
                 try:
                     sqlite_db.cursor.execute("""
                         SELECT
                             sku_id, product_name, brand, pack_size,
                             mrp, dmart_price, availability,
-                            category_name, product_url, image_url, description, category_id
+                            category_name, product_url, image_url, category_id
                         FROM dmart_product_master
+                        WHERE scraped_at >= ?
                         ORDER BY scraped_at DESC
-                    """)
+                    """, (run_start_time,))
                     rows = sqlite_db.cursor.fetchall()
                 except Exception as e:
                     logger.error(f"SQLite read failed: {e}")
                     rows = []
 
                 logger.info(f"Syncing {len(rows)} products from SQLite → MySQL...")
-                synced = 0
+                inserted = 0
+                updated = 0
                 failed = 0
 
                 for row in rows:
@@ -351,7 +339,7 @@ def scrape_dmart_search(
                             (
                                 sku_id, product_name, brand, pack_size,
                                 mrp, dmart_price, availability,
-                                category_name, product_url, image_url, description, category_id
+                                category_name, product_url, image_url, category_id
                             ) = row
 
                             if not sku_id:
@@ -361,39 +349,49 @@ def scrape_dmart_search(
                             mrp_str      = str(mrp) if mrp is not None else "0.0"
                             cat_str      = category_name or "Uncategorized"
                             name_str     = product_name or "Unknown Product"
+                            from services.scrapers.dmart_engine.cleaner import DataCleaner
+                            clean_name   = DataCleaner.clean_product_name(name_str)
 
+                            is_update = False
                             existing = DMart.query.filter_by(asin=sku_id).first()
                             if existing:
-                                existing.title       = name_str
-                                existing.imgUrl      = image_url
-                                existing.productUrl  = product_url
+                                is_update = True
+                                existing.title       = clean_name or existing.title
+                                if image_url:
+                                    existing.imgUrl  = image_url
+                                existing.productUrl  = product_url or existing.productUrl
                                 existing.price       = price_str
                                 existing.listPrice   = mrp_str
-                                existing.categoryName = cat_str
-                                existing.brand       = brand
-                                existing.description = description
-                                existing.category_id = category_id
-                                existing.quantity    = pack_size
+                                # Defensively avoid overwriting categories with Uncategorized or null
+                                if cat_str and cat_str not in ("Uncategorized", "null"):
+                                    existing.categoryName = cat_str
+                                if category_id:
+                                    existing.category_id = category_id
+                                existing.brand       = brand or existing.brand
+                                existing.quantity    = pack_size or existing.quantity
+                                existing.availability = availability
                             else:
                                 new_product = DMart(
                                     asin         = sku_id,
-                                    title        = name_str,
+                                    title        = clean_name,
                                     imgUrl       = image_url,
                                     productUrl   = product_url,
-                                    stars        = "0.0",
-                                    reviews      = "0",
                                     price        = price_str,
                                     listPrice    = mrp_str,
                                     categoryName = cat_str,
                                     brand        = brand,
-                                    description  = description,
                                     category_id  = category_id,
-                                    quantity     = pack_size
+                                    quantity     = pack_size,
+                                    availability = availability
                                 )
                                 db.session.add(new_product)
 
-                            synced += 1
-                            if synced % 200 == 0:
+                            if is_update:
+                                updated += 1
+                            else:
+                                inserted += 1
+
+                            if (inserted + updated) % 200 == 0:
                                 db.session.commit()
                             
                             break  # Success
@@ -420,9 +418,10 @@ def scrape_dmart_search(
                     logger.error(f"Final fallback commit failed: {final_commit_err}")
 
                 logger.info(
-                    f"MySQL sync complete: {synced} synced, {failed} failed "
+                    f"MySQL sync complete: {inserted} new products inserted, {updated} existing products updated, {failed} failed "
                     f"from {len(rows)} total SQLite rows."
                 )
+
 
                 # ── Export master CSV from SQLite ──
                 try:
@@ -436,12 +435,13 @@ def scrape_dmart_search(
                 db.session.rollback()
                 db.session.remove()
                 logger.error(f"Scrape failed for pincode {pin}: {e}", exc_info=True)
-                if task:
+                if task_id:
                     try:
-                        db.session.refresh(task)
-                        task.status = "ERROR"
-                        task.error_message = str(e)
-                        db.session.commit()
+                        active_task = ScraperTask.query.get(task_id)
+                        if active_task:
+                            active_task.status = "ERROR"
+                            active_task.error_message = str(e)
+                            db.session.commit()
                     except Exception:
                         pass
                 raise
@@ -449,13 +449,14 @@ def scrape_dmart_search(
                 sqlite_db.close()
 
         # Mark ScraperTask as COMPLETED
-        if task:
+        if task_id:
             try:
-                db.session.refresh(task)
-                task.status = "COMPLETED"
-                task.progress = 100
-                db.session.commit()
-                logger.info(f"ScraperTask {task_id} marked as COMPLETED")
+                active_task = ScraperTask.query.get(task_id)
+                if active_task:
+                    active_task.status = "COMPLETED"
+                    active_task.progress = 100
+                    db.session.commit()
+                    logger.info(f"ScraperTask {task_id} marked as COMPLETED")
             except Exception as t_err:
                 logger.error(f"Failed to set task as COMPLETED: {t_err}")
 
@@ -474,9 +475,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="DMart Scraper Standalone Process Runner")
     parser.add_argument("--search_term", type=str, required=True)
     parser.add_argument("--mode", type=str, default="category")
-    parser.add_argument("--pincodes", type=str, default="400001")
+    parser.add_argument("--pincodes", type=str, default="all")
     parser.add_argument("--max_categories", type=int, default=None)
     parser.add_argument("--task_id", type=int, default=None)
+    parser.add_argument("--categories", type=str, default=None)
     
     args = parser.parse_args()
     
@@ -487,5 +489,6 @@ if __name__ == '__main__':
         mode=args.mode,
         pincodes=args.pincodes,
         max_categories=args.max_categories,
-        task_id=args.task_id
+        task_id=args.task_id,
+        categories=args.categories
     )

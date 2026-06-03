@@ -56,6 +56,7 @@ class DataCleaner:
     def clean_product_name(name: Optional[str]) -> Optional[str]:
         """
         Clean product name: strip whitespace, newlines, and extra spaces.
+        Also removes the trailing quantity/pack size suffix (separated by ' : ').
         
         Args:
             name: Raw product name.
@@ -63,7 +64,21 @@ class DataCleaner:
         Returns:
             Cleaned product name string.
         """
-        return DataCleaner.clean_text(name)
+        cleaned = DataCleaner.clean_text(name)
+        if cleaned:
+            # Strip trailing colon pattern with quantity, e.g., "Active: 50 g" or "Active : 50g"
+            cleaned = re.sub(
+                r'\s*:\s*\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters|pcs?|pieces?|units?|pack|sheets?|capsules?)\s*$',
+                '',
+                cleaned,
+                flags=re.IGNORECASE
+            )
+            # Fallback for any other colon separated suffix
+            if " : " in cleaned:
+                parts = cleaned.split(" : ")
+                if len(parts) > 1:
+                    cleaned = " : ".join(parts[:-1]).strip()
+        return cleaned
 
     @staticmethod
     def clean_brand(brand: Optional[str]) -> Optional[str]:
@@ -347,12 +362,23 @@ class DataCleaner:
             else:
                 image_url = DataCleaner.build_full_url(image_url)
 
+        raw_name = raw.get('product_name') or raw.get('name') or raw.get('title')
+        
+        # Self-healing extraction: if pack_size is missing, try to extract it from the product name
+        extracted_pack_size = None
+        if raw_name:
+            match = re.search(
+                r'\s*:\s*(\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters|pcs?|pieces?|units?|pack|sheets?|capsules?))\s*$',
+                raw_name,
+                re.IGNORECASE
+            )
+            if match:
+                extracted_pack_size = match.group(1)
+
         return {
             'product_url': product_url,
             'sku_id': str(sku) if sku else None,
-            'product_name': DataCleaner.clean_product_name(
-                raw.get('product_name') or raw.get('name') or raw.get('title')
-            ),
+            'product_name': DataCleaner.clean_product_name(raw_name),
             'brand': DataCleaner.clean_brand(
                 raw.get('brand') or raw.get('brand_name')
             ),
@@ -362,6 +388,7 @@ class DataCleaner:
             'pack_size': DataCleaner.clean_pack_size(
                 raw.get('pack_size') or raw.get('packSize')
                 or raw.get('uom') or raw.get('variant')
+                or extracted_pack_size
             ),
             'availability': DataCleaner.clean_availability(
                 raw.get('availability')

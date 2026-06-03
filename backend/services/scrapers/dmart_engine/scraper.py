@@ -1197,6 +1197,27 @@ class DMartScraper:
         safe_name = category_slug.replace('/', '_').replace('\\', '_')
         return CATEGORY_EXPORT_DIR / f"{safe_name}_{self.pincode}.completed"
 
+    def _is_category_completed(self, category_slug: str) -> bool:
+        """Check if a category completion marker exists and is less than 24 hours old."""
+        path = self._get_completion_path(category_slug)
+        if not path.exists():
+            return False
+        try:
+            mtime = path.stat().st_mtime
+            import time
+            if (time.time() - mtime) > 86400:
+                logger.info(f"Completion marker {path.name} is stale (older than 24h). Deleting...")
+                try:
+                    path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return False
+            return True
+        except Exception as e:
+            logger.warning(f"Error checking completion marker age for '{category_slug}': {e}")
+            return False
+
+
 
     @staticmethod
     def _stream_to_jsonl(product: dict, jsonl_path: Path):
@@ -1320,6 +1341,18 @@ class DMartScraper:
         jsonl_path = self._get_jsonl_path(category_slug)
         csv_path = self._get_csv_path(category_slug)
         
+        # If JSONL file is older than 24 hours, delete it to ensure a fresh weekly run
+        if jsonl_path.exists():
+            try:
+                import time
+                mtime = jsonl_path.stat().st_mtime
+                if (time.time() - mtime) > 86400:
+                    logger.info(f"JSONL cache {jsonl_path.name} is stale (older than 24h). Deleting...")
+                    jsonl_path.unlink(missing_ok=True)
+                    csv_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning(f"Failed to check/delete stale JSONL cache: {e}")
+        
         # Initialize category state variables
         if active_page is not None:
             active_page.current_category_id = category_id
@@ -1346,17 +1379,8 @@ class DMartScraper:
             scraped_skus_set = self.scraped_skus
             scraped_names_set = self.scraped_names
 
-        # Pre-load SQLite and JSONL caches
-        existing_products = self.db.get_existing_products_for_category(category_id)
-        for p in existing_products:
-            sku = str(p.get('sku_id', '')).strip()
-            name = p.get('product_name')
-            size = p.get('pack_size')
-            if sku:
-                scraped_skus_set.add(sku)
-            if name:
-                scraped_names_set.add((str(name).strip().lower(), str(size).strip().lower() if size else ""))
-
+        # Pre-load only from the active JSONL cache for current run crash recovery
+        # (Do NOT pre-load existing SQLite database products as they prevent updating prices/stock on weekly re-scrapes!)
         if jsonl_path.exists():
             try:
                 with open(jsonl_path, 'r', encoding='utf-8') as f:
@@ -1488,13 +1512,14 @@ class DMartScraper:
 
     # ── Main Run Orchestrator ─────────────────────────────────
 
-    async def run(self, max_categories: Optional[int] = None):
+    async def run(self, max_categories: Optional[int] = None, categories_to_scrape: Optional[List[str]] = None):
         """
         Main entry point: discover categories and scrape each one.
         
         Args:
             max_categories: Limit the number of categories to scrape
                            (useful for testing). None = scrape all.
+            categories_to_scrape: Specific categories to scrape (None = scrape all).
         """
         logger.info("=" * 60)
         logger.info("DMart Scraper — Starting")
@@ -1505,14 +1530,30 @@ class DMartScraper:
         # Step 1: Discover categories
         categories = await self.discover_categories()
 
+        if categories_to_scrape:
+            filtered_categories = []
+            for cat in categories:
+                cat_name_lower = cat['name'].lower().strip()
+                cat_slug_lower = cat['slug'].lower().strip()
+                match = False
+                for target_cat in categories_to_scrape:
+                    target_lower = target_cat.lower().strip()
+                    if target_lower in cat_name_lower or target_lower in cat_slug_lower:
+                        match = True
+                        break
+                if match:
+                    filtered_categories.append(cat)
+            categories = filtered_categories
+            logger.info(f"Filtered categories to: {[c['name'] for c in categories]} based on target list: {categories_to_scrape}")
+
+
         # ── Dynamic Pincode Completion Check ──
         # A pincode is dynamically completed ONLY if all discovered categories
         # have successfully compiled and completed metadata markers on disk.
         if len(categories) > 0 and not max_categories:
             non_completed_slugs = []
             for cat in categories:
-                completion_path = self._get_completion_path(cat['slug'])
-                if not completion_path.exists():
+                if not self._is_category_completed(cat['slug']):
                     non_completed_slugs.append(cat['slug'])
 
             if not non_completed_slugs:
@@ -1550,8 +1591,7 @@ class DMartScraper:
 
         async def worker(cat: Dict[str, Any], idx: int):
             async with sem:
-                completion_path = self._get_completion_path(cat['slug'])
-                if completion_path.exists():
+                if self._is_category_completed(cat['slug']):
                     logger.info(f"[Skip] Category '{cat['name']}' already fully scraped. Skipping...")
                     return
 

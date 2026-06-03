@@ -10,9 +10,8 @@ import api from "../../utils/Api";
 
 const DmartScraper = () => {
   const [searchTerm, setSearchTerm] = useState("all");
-  const [mode, setMode] = useState("category"); // 'category', 'sitemap'
-  const [pincodeMode, setPincodeMode] = useState("single"); // 'single', 'all'
-  const [pincodes, setPincodes] = useState("400001");
+  const mode = "category";
+  const [categories, setCategories] = useState("");
   const [maxCategories, setMaxCategories] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -169,17 +168,23 @@ const DmartScraper = () => {
     }, 2000);
   };
 
-  const handleScrape = async () => {
+  const handleScrape = async (overrideCategories) => {
     setError("");
     setResult(null);
     setLogs([]);
     setLoading(true);
 
-    const targetPincodes = pincodeMode === "all" ? "all" : pincodes;
+    const targetPincodes = "all";
+    const targetCategories = overrideCategories !== undefined ? overrideCategories : categories;
 
     addLog(`[SYSTEM] Initializing Playwright Scraper Engine...`, "system");
-    addLog(`[CONFIG] Pincode target: ${targetPincodes}`, "info");
+    addLog(`[CONFIG] Running across famous pincodes`, "info");
     addLog(`[CONFIG] Mode selected: ${mode.toUpperCase()}`, "info");
+    if (targetCategories) {
+      addLog(`[CONFIG] Target categories: ${targetCategories}`, "info");
+    } else {
+      addLog(`[CONFIG] Target categories: ALL`, "info");
+    }
     if (maxCategories) {
       addLog(`[CONFIG] Limit category cap: ${maxCategories}`, "warning");
     }
@@ -193,6 +198,7 @@ const DmartScraper = () => {
           search_term: searchTerm,
           mode: mode,
           pincodes: targetPincodes,
+          categories: targetCategories || null,
           max_categories: maxCategories ? parseInt(maxCategories) : null,
         },
         {
@@ -217,6 +223,11 @@ const DmartScraper = () => {
       addLog(`[ERROR] Execution halted: ${errMsg}`, "error");
       setLoading(false);
     }
+  };
+
+  const handleScrapeAll = () => {
+    setCategories("");
+    handleScrape("");
   };
 
   return (
@@ -246,99 +257,22 @@ const DmartScraper = () => {
               🎛️ Control Panel Configuration
             </Typography>
 
-            {/* Selector: Scraping Mode */}
+
+            {/* Input: Desired Categories */}
             <div className="space-y-2">
               <Typography className="text-xs uppercase text-gray-500 font-bold">
-                Scraper Running Mode
+                Desired Categories
               </Typography>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMode("category")}
-                  className={`py-3 px-1 rounded-lg text-[10px] font-bold border flex items-center justify-center transition-all ${
-                    mode === "category"
-                      ? "bg-green-600 border-green-600 text-white shadow-sm"
-                      : "bg-white border-blue-gray-100 text-blue-gray-800 hover:bg-gray-50"
-                  }`}
-                >
-                  Category
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("sitemap")}
-                  className={`py-3 px-1 rounded-lg text-[10px] font-bold border flex items-center justify-center transition-all ${
-                    mode === "sitemap"
-                      ? "bg-green-600 border-green-600 text-white shadow-sm"
-                      : "bg-white border-blue-gray-100 text-blue-gray-800 hover:bg-gray-50"
-                  }`}
-                >
-                  Sitemap
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("hybrid")}
-                  className={`py-3 px-1 rounded-lg text-[10px] font-bold border flex items-center justify-center transition-all ${
-                    mode === "hybrid"
-                      ? "bg-green-600 border-green-600 text-white shadow-sm"
-                      : "bg-white border-blue-gray-100 text-blue-gray-800 hover:bg-gray-50"
-                  }`}
-                >
-                  Hybrid
-                </button>
-              </div>
-              <Typography className="text-[11px] text-gray-500 leading-relaxed italic">
-                {mode === "category"
-                  ? "Category Mode performs infinite scroll category page scans."
-                  : mode === "sitemap"
-                  ? "Sitemap Mode loads directly from product sitemaps for detailed descriptions."
-                  : "Hybrid Mode crawls categories first, then fetches missing descriptions from sitemap."}
+              <Input
+                label="Categories to Scrape"
+                placeholder="e.g. Grocery & Staples, Beverages"
+                shrink={true}
+                value={categories}
+                onChange={(e) => setCategories(e.target.value)}
+              />
+              <Typography className="text-[10px] text-gray-400 mt-1">
+                Enter a comma-separated list of category names/slugs, or leave blank to scrape all.
               </Typography>
-            </div>
-
-            {/* Selector: Pincode Options */}
-            <div className="space-y-2">
-              <Typography className="text-xs uppercase text-gray-500 font-bold">
-                Pincode Scope
-              </Typography>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPincodeMode("single")}
-                  className={`py-2 px-4 rounded-lg text-xs font-semibold border transition-all ${
-                    pincodeMode === "single"
-                      ? "bg-blue-600 border-blue-600 text-white"
-                      : "bg-white border-blue-gray-100 text-blue-gray-800 hover:bg-gray-50"
-                  }`}
-                >
-                  Targeted List
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPincodeMode("all")}
-                  className={`py-2 px-4 rounded-lg text-xs font-semibold border transition-all ${
-                    pincodeMode === "all"
-                      ? "bg-blue-600 border-blue-600 text-white"
-                      : "bg-white border-blue-gray-100 text-blue-gray-800 hover:bg-gray-50"
-                  }`}
-                >
-                  Loop All (195 Zones)
-                </button>
-              </div>
-
-              {pincodeMode === "single" && (
-                <div className="mt-3">
-                  <Input
-                    label="Pincode Targets"
-                    placeholder="e.g. 400001, 411001"
-                    shrink={true}
-                    value={pincodes}
-                    onChange={(e) => setPincodes(e.target.value)}
-                  />
-                  <Typography className="text-[10px] text-gray-400 mt-1">
-                    Accepts comma-separated list of pincodes.
-                  </Typography>
-                </div>
-              )}
             </div>
 
             {/* Testing Option: Max Categories */}
@@ -359,27 +293,41 @@ const DmartScraper = () => {
               </Typography>
             </div>
 
-            {/* Trigger Button */}
-            <Button
-              onClick={handleScrape}
-              fullWidth
-              disabled={loading}
-              className="bg-green-600 text-sm font-bold flex items-center justify-center gap-3 py-3"
-            >
-              {loading ? (
-                <>
-                  <span className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  Scraping background jobs active...
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
-                  </svg>
-                  Start D-Mart Scrape
-                </>
+            {/* Action Buttons */}
+            <div className="space-y-2">
+              <Button
+                onClick={() => handleScrape()}
+                fullWidth
+                disabled={loading}
+                className="bg-green-600 text-sm font-bold flex items-center justify-center gap-3 py-3"
+              >
+                {loading ? (
+                  <>
+                    <span className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    Scraping background jobs active...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                    </svg>
+                    Start D-Mart Scrape
+                  </>
+                )}
+              </Button>
+
+              {!loading && (
+                <Button
+                  onClick={handleScrapeAll}
+                  fullWidth
+                  variant="outlined"
+                  color="blue-gray"
+                  className="text-sm font-bold flex items-center justify-center gap-3 py-3"
+                >
+                  🧹 Scrape All Categories
+                </Button>
               )}
-            </Button>
+            </div>
 
             {error && (
               <div className="p-3 bg-red-50 rounded-md border border-red-100">

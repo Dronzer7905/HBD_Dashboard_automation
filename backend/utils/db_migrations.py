@@ -289,6 +289,31 @@ def run_pending_migrations(app):
                             conn.execute(text("ALTER TABLE dmart_products ADD COLUMN quantity VARCHAR(100) NULL"))
                             logger.info("✅ Column `quantity` successfully added to `dmart_products`.")
 
+                        # Ensure availability column exists in dmart_products
+                        col_check_avail = text("""
+                            SELECT COUNT(*) FROM information_schema.COLUMNS 
+                            WHERE TABLE_SCHEMA = DATABASE() 
+                            AND TABLE_NAME = 'dmart_products' 
+                            AND COLUMN_NAME = 'availability'
+                        """)
+                        if conn.execute(col_check_avail).scalar() == 0:
+                            logger.info("⚠️ Column `availability` missing in `dmart_products`. Adding column...")
+                            conn.execute(text("ALTER TABLE dmart_products ADD COLUMN availability INT DEFAULT 1"))
+                            logger.info("✅ Column `availability` successfully added to `dmart_products`.")
+
+                        # Drop redundant rating and description columns if present
+                        for old_col in ["rating", "Number_of_ratings", "description"]:
+                            col_check_old = text(f"""
+                                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                                WHERE TABLE_SCHEMA = DATABASE() 
+                                AND TABLE_NAME = 'dmart_products' 
+                                AND COLUMN_NAME = '{old_col}'
+                            """)
+                            if conn.execute(col_check_old).scalar() > 0:
+                                logger.info(f"⚠️ Column `{old_col}` is redundant in `dmart_products`. Dropping column...")
+                                conn.execute(text(f"ALTER TABLE dmart_products DROP COLUMN {old_col}"))
+                                logger.info(f"✅ Column `{old_col}` successfully dropped from `dmart_products`.")
+
                     # 3. MySQL dmart_categories seeding is disabled on boot as per User request.
                     # Instead, categories are dynamically saved and synchronized in real-time.
                     pass

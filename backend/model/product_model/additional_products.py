@@ -54,15 +54,13 @@ class DMart(db.Model):
     title = db.Column('Product_name', db.Text)
     imgUrl = db.Column('Image_URLs', db.Text)
     productUrl = db.Column('link', db.Text)
-    stars = db.Column('rating', db.String(50))
-    reviews = db.Column('Number_of_ratings', db.String(50))
     price = db.Column('price', db.String(100))
     listPrice = db.Column('listPrice', db.String(100), nullable=True)
     categoryName = db.Column('category', db.String(255))
     brand = db.Column('Brand', db.String(255))
-    description = db.Column('description', db.Text)
     category_id = db.Column(db.Integer, db.ForeignKey('dmart_categories.category_id', ondelete='SET NULL'), nullable=True)
     quantity = db.Column('quantity', db.String(100), nullable=True)
+    availability = db.Column('availability', db.Integer, default=1)
 
     @property
     def isBestSeller(self):
@@ -87,11 +85,10 @@ class DMart(db.Model):
             "name": self.title,
             "price": self.price,
             "list_price": self.listPrice,
-            "stars": self.stars,
-            "reviews": self.reviews,
             "category": self.categoryName,
             "category_id": self.category_id,
             "quantity": self.quantity,
+            "availability": self.availability,
             "link": self.productUrl
         }
 

@@ -15,7 +15,7 @@ def upload_dmart_data(file_paths):
     batch_size = 10000
     upload_success = False
     try:
-        drop_non_essential_indexes(cursor,'dmart',['stars','Price','categoryName'])
+        drop_non_essential_indexes(cursor,'dmart',['price','categoryName'])
         connection.commit()
         for file in file_paths:
             with open(file,newline='',encoding='utf-8') as f:  
@@ -29,30 +29,27 @@ def upload_dmart_data(file_paths):
                         safe_get(row, 'title'),
                         safe_get(row, 'imgUrl'),
                         safe_get(row, 'productURL'),
-                        safe_get(row, 'stars'),
-                        safe_get(row, 'reviews'),
                         safe_get(row, 'price'),
                         safe_get(row, 'listPrice'),
                         safe_get(row, 'categoryName'),
-                        safe_get(row, 'isBestSeller'),
-                        safe_get(row, 'boughtInLastMonth'),
+                        safe_get(row, 'quantity') or safe_get(row, 'pack_size') or safe_get(row, 'packSize'),
+                        safe_get(row, 'availability') or 1,
                         )
                         chunk_data.append(row_tuple)
 
                     # storing the valus in the database
                     upload_dmart_data_query = '''
                     INSERT INTO dmart_products (
-                        asin, title, imgUrl, productUrl, stars, reviews, price, listPrice, categoryName, isBestSeller, boughtInLastMonth) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        asin, title, imgUrl, productUrl, price, listPrice, categoryName, quantity, availability) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                         title = VALUES(title),
                         imgUrl = VALUES(imgUrl),
                         productUrl = VALUES(productUrl),
-                        stars = VALUES(stars),
-                        reviews = VALUES(reviews),
                         price = VALUES(price),
                         listPrice = VALUES(listPrice),
                         categoryName = VALUES(categoryName),
-                        isBestSeller = VALUES(isBestSeller);
+                        quantity = VALUES(quantity),
+                        availability = VALUES(availability);
 
                 '''
                     try:
@@ -67,7 +64,7 @@ def upload_dmart_data(file_paths):
         return inserted
     finally:
         if upload_success:
-            create_non_essential_indexes(cursor,'dmart',['stars','price','categoryName'])
+            create_non_essential_indexes(cursor,'dmart',['price','categoryName'])
             connection.commit()
         cursor.close()
         connection.close()

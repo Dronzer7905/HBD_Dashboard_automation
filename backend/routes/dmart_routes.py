@@ -10,8 +10,11 @@ def scrape_dmart():
         data = request.get_json() or {}
         search_term = data.get('search_term', 'all')
         mode = data.get('mode', 'category')
-        pincodes = data.get('pincodes', '400001')
+        pincodes = data.get('pincodes', 'all')
+        if not pincodes or str(pincodes).strip() == "":
+            pincodes = 'all'
         max_categories = data.get('max_categories')
+        categories = data.get('categories')
 
         if not search_term:
             return jsonify({'error': 'search_term is required'}), 400
@@ -45,6 +48,9 @@ def scrape_dmart():
         ]
         if max_categories is not None:
             cmd.extend(["--max_categories", str(max_categories)])
+        if categories:
+            cmd.extend(["--categories", str(categories)])
+
             
         # UTF-8 encoding environment for Windows logs compatibility
         env = os.environ.copy()
