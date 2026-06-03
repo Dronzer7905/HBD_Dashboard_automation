@@ -596,9 +596,26 @@ const Badge = ({ label, cls = "badge-gray" }) => (
 );
 
 /* ================================================================
-   CHART CARD WRAPPER — auto-hides if no data
+   CHART CARD WRAPPER — shows loading state or auto-hides if no data
    ================================================================ */
-const ChartCard = ({ title, sub, badge, badgeCls = "badge-purple", span2 = false, hasData, children }) => {
+const ChartCard = ({ title, sub, badge, badgeCls = "badge-purple", span2 = false, hasData, isLoading = false, children }) => {
+  if (isLoading) {
+    return (
+      <div className={`pdr-chart-card${span2 ? " span-2" : ""}`}>
+        <div className="cc-header">
+          <div>
+            <div className="cc-title">{title}</div>
+            <div className="cc-sub">{sub}</div>
+          </div>
+          <span className={`cc-badge ${badgeCls}`}>{badge}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, flexDirection: "column", gap: 10 }}>
+          <div className="pdr-spinner" style={{ width: 28, height: 28, borderWidth: 2 }} />
+          <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>Loading chart data…</span>
+        </div>
+      </div>
+    );
+  }
   if (!hasData) return null;
   return (
     <div className={`pdr-chart-card${span2 ? " span-2" : ""}`}>
@@ -626,6 +643,8 @@ export default function ProductDataReport() {
   const [roster, setRoster] = useState([]);
   const [products, setProducts] = useState([]);
   const [chartData, setChartData] = useState({});
+  const [chartLoading, setChartLoading] = useState(false);
+  const [liveMapping, setLiveMapping] = useState({});
   const [allCatMapping, setAllCatMapping] = useState([]);
   const [mappedCats, setMappedCats] = useState([]);
   const [unmappedCats, setUnmappedCats] = useState([]);
@@ -694,12 +713,23 @@ export default function ProductDataReport() {
 
   /* ── Fetch chart data from server (full dataset, no sampling) ── */
   const fetchChartData = useCallback(async () => {
+    setChartLoading(true);
+    setChartData({});
     try {
       const mp = platform === "All" ? "all" : platform.toLowerCase();
       const r = await api.get(`/product-report/chart-data?marketplace=${mp}`);
       setChartData(r.data?.data || {});
     } catch (e) { console.warn("chart-data fetch error", e); }
+    finally { setChartLoading(false); }
   }, [platform]);
+
+  /* ── Fetch live mapping counts (accurate, DB-direct) ── */
+  const fetchLiveMapping = useCallback(async () => {
+    try {
+      const r = await api.get("/product-report/live-mapping-counts");
+      setLiveMapping(r.data?.data || {});
+    } catch (e) { console.warn("live-mapping-counts fetch error", e); }
+  }, []);
 
   /* ── Fetch all-categories mapping ── */
   const fetchAllCatMapping = useCallback(async (search = "") => {
@@ -743,6 +773,7 @@ export default function ProductDataReport() {
 
       // Also fetch chart data and mapping in background
       fetchChartData();
+      fetchLiveMapping();
 
       // If marketplace has no data, auto-trigger backend refresh
       const sum = sumR.data?.data;
@@ -1381,14 +1412,31 @@ export default function ProductDataReport() {
         <div className="pdr-spinner-wrap"><div className="pdr-spinner" /><span className="pdr-spinner-text">Loading analytics…</span></div>
       ) : summary && !isPending ? (
         <div className="pdr-kpi-grid">
-          {[
-            { label: "Total Products", value: Number(summary.total_products || 0).toLocaleString("en-IN"), sub: `${Number(summary.mapped_products || 0).toLocaleString()} mapped`, icon: "📊", accent: pt.accent },
-            { label: "Avg Selling Price", value: `₹${Number(summary.avg_selling_price || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`, sub: `${Number(summary.total_brands || 0)} brands`, icon: "💰", accent: "#f59e0b" },
-            { label: "In Stock Rate", value: `${summary.total_products > 0 ? ((summary.available_products / summary.total_products) * 100).toFixed(1) : 0}%`, sub: `${Number(summary.available_products || 0).toLocaleString()} available`, icon: "✅", accent: "#22c55e" },
-            { label: "Categories", value: Number(summary.total_categories || 0).toLocaleString(), sub: `${summary.completed_categories} mapped · ${summary.pending_categories} pending`, icon: "📁", accent: "#6366f1" },
-            { label: "Mapped Products", value: Number(summary.mapped_products || 0).toLocaleString("en-IN"), sub: `${summary.unmapped_products || 0} unmapped`, icon: "🔗", accent: "#8b5cf6" },
-            { label: "Out of Stock", value: Number(summary.out_of_stock_products || 0).toLocaleString("en-IN"), sub: `${summary.total_products > 0 ? ((summary.out_of_stock_products / summary.total_products) * 100).toFixed(1) : 0}% of catalog`, icon: "⚠️", accent: "#f43f5e" },
-          ].map((k, i) => (
+          {(() => {
+            // Get live mapping counts for current platform
+            let lMapped = 0, lUnmapped = 0, lCats = 0;
+            if (platform === "All") {
+              Object.values(liveMapping).forEach(d => {
+                lMapped += d.mapped || 0;
+                lUnmapped += d.unmapped || 0;
+                lCats += d.categories || 0;
+              });
+            } else {
+              const d = liveMapping[platform.toLowerCase()] || {};
+              lMapped = d.mapped || 0;
+              lUnmapped = d.unmapped || 0;
+              lCats = d.categories || 0;
+            }
+            const haslive = lMapped > 0 || lUnmapped > 0;
+            return [
+              { label: "Total Products", value: Number(summary.total_products || 0).toLocaleString("en-IN"), sub: haslive ? `${Number(lMapped).toLocaleString("en-IN")} mapped` : `${Number(summary.mapped_products || 0).toLocaleString()} mapped`, icon: "📊", accent: pt.accent },
+              { label: "Avg Selling Price", value: `₹${Number(summary.avg_selling_price || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`, sub: `${Number(summary.total_brands || 0)} brands`, icon: "💰", accent: "#f59e0b" },
+              { label: "In Stock Rate", value: `${summary.total_products > 0 ? ((summary.available_products / summary.total_products) * 100).toFixed(1) : 0}%`, sub: `${Number(summary.available_products || 0).toLocaleString()} available`, icon: "✅", accent: "#22c55e" },
+              { label: "Mapped Categories", value: haslive ? Number(lCats).toLocaleString("en-IN") : Number(summary.total_categories || 0).toLocaleString(), sub: haslive ? `Live from DB mapping tables` : `${summary.completed_categories} mapped · ${summary.pending_categories} pending`, icon: "📁", accent: "#6366f1" },
+              { label: "Mapped Products", value: haslive ? Number(lMapped).toLocaleString("en-IN") : Number(summary.mapped_products || 0).toLocaleString("en-IN"), sub: haslive ? `${Number(lUnmapped).toLocaleString("en-IN")} unmapped` : `${summary.unmapped_products || 0} unmapped`, icon: "🔗", accent: "#8b5cf6" },
+              { label: "Out of Stock", value: Number(summary.out_of_stock_products || 0).toLocaleString("en-IN"), sub: `${summary.total_products > 0 ? ((summary.out_of_stock_products / summary.total_products) * 100).toFixed(1) : 0}% of catalog`, icon: "⚠️", accent: "#f43f5e" },
+            ];
+          })().map((k, i) => (
             <div key={i} className="pdr-kpi-card" style={{ "--accent": k.accent }}>
               <div className="kpi-icon">{k.icon}</div>
               <div className="kpi-label">{k.label}</div>
@@ -2261,7 +2309,7 @@ export default function ProductDataReport() {
                 const priceMrp = chartData.zepto_price_vs_mrp || [];
                 return (
                   <div className="pdr-charts-grid">
-                    <ChartCard title="Category-wise Product Count" sub="Product distribution across Zepto quick commerce categories (8,253 products)" badge="Bar" hasData={cats.length > 0}>
+                    <ChartCard title="Category-wise Product Count" sub="Product distribution across Zepto quick commerce categories" badge="Bar" hasData={cats.length > 0} isLoading={chartLoading && cats.length === 0}>
                       <ResponsiveContainer width="100%" height={280}>
                         <BarChart data={cats} margin={{ top: 10, right: 10, left: 0, bottom: 50 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -2273,7 +2321,7 @@ export default function ProductDataReport() {
                       </ResponsiveContainer>
                     </ChartCard>
 
-                    <ChartCard title="Sub-Category Distribution" sub="Zepto product spread across sub-categories" badge="Donut" hasData={subcats.length > 0}>
+                    <ChartCard title="Sub-Category Distribution" sub="Zepto product spread across sub-categories" badge="Donut" hasData={subcats.length > 0} isLoading={chartLoading && subcats.length === 0}>
                       <div style={{ position: "relative" }}>
                         <ResponsiveContainer width="100%" height={280}>
                           <PieChart>
@@ -2287,7 +2335,7 @@ export default function ProductDataReport() {
                       </div>
                     </ChartCard>
 
-                    <ChartCard title="Price Range Distribution" sub="Zepto product count across price segments" badge="Histogram" hasData={prices.length > 0}>
+                    <ChartCard title="Price Range Distribution" sub="Zepto product count across price segments" badge="Histogram" hasData={prices.length > 0} isLoading={chartLoading && prices.length === 0}>
                       <ResponsiveContainer width="100%" height={280}>
                         <BarChart data={prices} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -2299,7 +2347,7 @@ export default function ProductDataReport() {
                       </ResponsiveContainer>
                     </ChartCard>
 
-                    <ChartCard title="Customer Rating Distribution" sub="Customer star rating distribution on Zepto (1-5)" badge="Histogram" hasData={ratings.length > 0}>
+                    <ChartCard title="Customer Rating Distribution" sub="Customer star rating distribution on Zepto (1-5)" badge="Histogram" hasData={ratings.length > 0} isLoading={chartLoading && ratings.length === 0}>
                       <ResponsiveContainer width="100%" height={280}>
                         <BarChart data={ratings} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -2311,7 +2359,7 @@ export default function ProductDataReport() {
                       </ResponsiveContainer>
                     </ChartCard>
 
-                    <ChartCard title="Discount Analysis by Category" sub="Average discount percentage per Zepto grocery category" badge="Area" hasData={discount.length > 0}>
+                    <ChartCard title="Discount Analysis by Category" sub="Average discount percentage per Zepto grocery category" badge="Area" hasData={discount.length > 0} isLoading={chartLoading && discount.length === 0}>
                       <ResponsiveContainer width="100%" height={280}>
                         <AreaChart data={discount} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
                           <defs><linearGradient id="zepDiscFill" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={pt.accent} stopOpacity={0.3} /><stop offset="95%" stopColor={pt.accent} stopOpacity={0} /></linearGradient></defs>
@@ -2324,7 +2372,7 @@ export default function ProductDataReport() {
                       </ResponsiveContainer>
                     </ChartCard>
 
-                    <ChartCard title="Top Rated Categories" sub="Categories with highest average customer ratings on Zepto" badge="Horizontal Bar" hasData={topRated.length > 0}>
+                    <ChartCard title="Top Rated Categories" sub="Categories with highest average customer ratings on Zepto" badge="Horizontal Bar" hasData={topRated.length > 0} isLoading={chartLoading && topRated.length === 0}>
                       <ResponsiveContainer width="100%" height={280}>
                         <BarChart data={topRated} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
@@ -2336,7 +2384,7 @@ export default function ProductDataReport() {
                       </ResponsiveContainer>
                     </ChartCard>
 
-                    <ChartCard title="Sale Price vs MRP by Category" sub="Average selling price vs market price comparison per category" badge="Dual Area" hasData={priceMrp.length > 0}>
+                    <ChartCard title="Sale Price vs MRP by Category" sub="Average selling price vs market price comparison per category" badge="Dual Area" hasData={priceMrp.length > 0} isLoading={chartLoading && priceMrp.length === 0}>
                       <ResponsiveContainer width="100%" height={280}>
                         <AreaChart data={priceMrp} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
                           <defs><linearGradient id="zepSaleFill" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={pt.accent} stopOpacity={0.3} /><stop offset="95%" stopColor={pt.accent} stopOpacity={0} /></linearGradient></defs>
@@ -2355,9 +2403,10 @@ export default function ProductDataReport() {
               })()}
 
               {/* No chart data fallback */}
-              {Object.keys(chartData).length === 0 && !loading && platform !== "All" && (
+              {Object.keys(chartData).length === 0 && !loading && !chartLoading && platform !== "All" && (
                 <div style={{ background: "#fff", borderRadius: 20, padding: "60px 0", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                  <div style={{ fontSize: 48, marginBottom: 16 }}>Chart data loading...</div>
+                  <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1d2e", marginBottom: 8 }}>No chart data available</div>
                   <button className="pdr-btn pdr-btn-primary" onClick={handleRefresh}>Sync Data Now</button>
                 </div>
               )}
