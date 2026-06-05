@@ -171,6 +171,7 @@ PUBLIC_ROUTES = [
     "/product-master/fetch-data",
     "/api/report/aggregate",
     "/api/report/health",
+    "/api/report/source-stats",
     "/api/googlemap_data",
     "/api/unmatched/counts",
     "/api/unmatched/list",
@@ -200,8 +201,8 @@ def protect_all_routes():
     normalized_path = request.path.rstrip('/')
     public_paths = [route.rstrip('/') for route in PUBLIC_ROUTES]
 
-    # Bypass for whitelist, fetch-data routes, or listing-upload / product-report prefix
-    if normalized_path in public_paths or normalized_path.endswith('/fetch-data') or normalized_path.startswith('/api/listing-upload') or normalized_path.startswith('/api/product-report'):
+    # Bypass for whitelist, fetch-data routes, or listing-upload / product-report / source- prefix
+    if normalized_path in public_paths or normalized_path.endswith('/fetch-data') or normalized_path.startswith('/api/listing-upload') or normalized_path.startswith('/api/product-report') or normalized_path.startswith('/api/report/source-'):
         return None
 
     try:
@@ -261,9 +262,9 @@ if __name__ == '__main__':
     
     ingestor = None
     if run_server_only:
-        print("🌐 Mode: API Server Only (Background ETL disabled for manual run)")
+        print("[SERVER] Mode: API Server Only (Background ETL disabled for manual run)")
     else:
-        print("🔗 Mode: All-in-One (Starting Background Sync Tool...)")
+        print("[ALL-IN-ONE] Mode: All-in-One (Starting Background Sync Tool...)")
         ingestor = start_background_etl()
         
         # Daemonize the ingestor thread if possible
@@ -280,12 +281,13 @@ if __name__ == '__main__':
             print('\n[SHUTDOWN] Shutdown requested...')
         if ingestor:
             ingestor.shutdown()
+        sys.argv = [sys.argv[0]] # clean args for safe shutdown
         sys.exit(0)
 
     # --- Run Flask standard server ---
     try:
         try:
-            print("🚀 Starting Flask standard server on port 8001. Press CTRL+C to quit.")
+            print("Starting Flask standard server on port 8001. Press CTRL+C to quit.")
         except UnicodeEncodeError:
             print("Starting Flask standard server on port 8001. Press CTRL+C to quit.")
         app.run(host='0.0.0.0', port=8001, debug=False) 
