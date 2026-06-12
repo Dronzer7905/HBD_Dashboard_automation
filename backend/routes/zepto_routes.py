@@ -45,6 +45,7 @@ def scrape_zepto():
 
         cmd = [
             sys.executable,
+            "-u",
             "-m",
             "services.scrapers.zepto_service",
             "--pincodes",
@@ -58,10 +59,11 @@ def scrape_zepto():
         if categories:
             cmd.extend(["--categories", str(categories)])
 
-        # UTF-8 encoding for Windows log compatibility
+        # UTF-8 encoding for Windows log compatibility and unbuffered output
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
 
         log_dir = os.path.join(backend_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)

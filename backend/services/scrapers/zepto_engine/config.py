@@ -3,20 +3,21 @@ from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent  # → backend/
-OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR = BASE_DIR / "output" / "zepto"
 EXPORT_DIR = OUTPUT_DIR / "exports"
 CATEGORY_EXPORT_DIR = EXPORT_DIR / "categories"
 JSONL_EXPORT_DIR = EXPORT_DIR / "jsonl"
 DB_PATH = OUTPUT_DIR / "zepto_master.db"
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
+# Make sure all directories exist recursively
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 CATEGORY_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 JSONL_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Target website ─────────────────────────────────────────────
-BASE_URL = "https://www.zeptonow.com"
+BASE_URL = "https://www.zepto.com"
 DEFAULT_PINCODE = "400001"
 
 # ── Stealth ───────────────────────────────────────────────────

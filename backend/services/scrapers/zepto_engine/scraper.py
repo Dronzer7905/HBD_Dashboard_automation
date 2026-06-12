@@ -137,7 +137,7 @@ class ZeptoScraper:
                 {
                     "name": "pincode",
                     "value": self.pincode,
-                    "domain": ".zeptonow.com",
+                    "domain": ".zepto.com",
                     "path": "/",
                     "httpOnly": False,
                     "secure": True,
@@ -145,7 +145,7 @@ class ZeptoScraper:
                 {
                     "name": "userPincode",
                     "value": self.pincode,
-                    "domain": ".zeptonow.com",
+                    "domain": ".zepto.com",
                     "path": "/",
                     "httpOnly": False,
                     "secure": True,
@@ -367,8 +367,63 @@ class ZeptoScraper:
 
 
     async def _extract_products_from_dom(self, page: Page) -> List[dict]:
-        # Light DOM fallback.
         products = []
+
+        # 1. Try to extract from #itemListSchema first (highly reliable SEO schema.org data)
+        try:
+            schema_el = await page.query_selector("#itemListSchema")
+            if schema_el:
+                content = await schema_el.inner_text()
+                if content:
+                    data = json.loads(content)
+                    items = data.get("itemListElement", [])
+                    for idx, list_item in enumerate(items):
+                        item = list_item.get("item", {})
+                        if not item:
+                            continue
+
+                        name = item.get("name")
+                        url = item.get("url") or list_item.get("url")
+                        image = item.get("image")
+
+                        # Parse sku_id from URL
+                        sku_id = None
+                        if url:
+                            pvid_match = re.search(r"pvid/([^/]+)", url)
+                            if pvid_match:
+                                sku_id = pvid_match.group(1)
+                            else:
+                                sku_id = url.split('/')[-1]
+
+                        if not sku_id and name:
+                            # fallback hash of name
+                            sku_id = f"hash_{hash(name)}"
+
+                        # Parse price
+                        raw_price = item.get("offers", {}).get("price")
+                        price = float(raw_price) / 100.0 if raw_price else None
+
+                        # Parse availability
+                        raw_avail = item.get("offers", {}).get("availability", "")
+                        availability = 1 if "InStock" in str(raw_avail) else 0
+
+                        products.append({
+                            "sku_id": sku_id,
+                            "product_name": name,
+                            "product_url": url,
+                            "image_url": image,
+                            "selling_price": price,
+                            "mrp": price,  # fallback to selling price
+                            "availability": availability,
+                        })
+
+                    if products:
+                        logger.info(f"[Schema] Successfully extracted {len(products)} products from #itemListSchema")
+                        return products
+        except Exception as e:
+            logger.warning(f"Failed to parse #itemListSchema: {e}")
+
+        # 2. Light DOM fallback.
         cards = []
         for sel in SELECTORS["product_card"]:
             try:
@@ -556,7 +611,7 @@ class ZeptoScraper:
                     await asyncio.sleep(cooldown)
                     continue
 
-                await self._handle_pincode_injection()
+                # Pincode injection is already run once at startup. Calling it here redirects the page away from category_url.
 
                 # wait for some product cards to render
                 try:
@@ -604,14 +659,78 @@ class ZeptoScraper:
                     raise
 
     async def discover_categories(self) -> List[Dict[str, Any]]:
-        # Simplified: since Zepto category sitemap can change,
-        # we keep a minimal static fallback list.
-        # This can be replaced later with API discovery.
-        return [
-            {"name": "Grocery", "slug": "grocery", "url": f"{BASE_URL}/shop/grocery"},
-            {"name": "Personal Care", "slug": "personal-care", "url": f"{BASE_URL}/shop/personal-care"},
-            {"name": "Fruits & Vegetables", "slug": "fruits-vegetables", "url": f"{BASE_URL}/shop/fruits-vegetables"},
+        logger.info(f"Discovering categories dynamically from {BASE_URL}...")
+        discovered = []
+        seen_urls = set()
+
+        # Fallback list with new subcategory /cn/ URL patterns in case dynamic fetch fails
+        fallback = [
+            {
+                "name": "Fresh Fruits",
+                "slug": "fresh-fruits",
+                "url": f"{BASE_URL}/cn/fruits-vegetables/fresh-fruits/cid/64374cfe-d06f-4a01-898e-c07c46462c36/scid/09e63c15-e5f7-4712-9ff8-513250b79942",
+            },
+            {
+                "name": "Fresh Vegetables",
+                "slug": "fresh-vegetables",
+                "url": f"{BASE_URL}/cn/fruits-vegetables/fresh-vegetables/cid/64374cfe-d06f-4a01-898e-c07c46462c36/scid/b4827798-fcb6-4520-ba5b-0f2bd9bd7208",
+            },
+            {
+                "name": "Atta",
+                "slug": "atta",
+                "url": f"{BASE_URL}/cn/atta-rice-oil-dals/atta/cid/2f7190d0-7c40-458b-b450-9a1006db3d95/scid/2b5e863c-9497-46ae-a7e9-85f6ef7380da",
+            },
         ]
+
+        if not self._page:
+            return fallback
+
+        try:
+            await self._page.goto(BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+            await self._page.wait_for_timeout(3000)
+
+            links = await self._page.query_selector_all("a")
+            for link in links:
+                href = await link.get_attribute("href")
+                if not href:
+                    continue
+
+                # Only process product grid pages (/cn/)
+                if "/cn/" in href:
+                    full_url = href if href.startswith("http") else f"{BASE_URL}{href}"
+                    if full_url not in seen_urls:
+                        seen_urls.add(full_url)
+
+                        # Extract name
+                        name = (await link.inner_text()).strip()
+                        slug = ""
+                        parts = href.split('/')
+                        idx_cn = parts.index("cn")
+                        if len(parts) > idx_cn + 2:
+                            slug = parts[idx_cn + 2]
+                        elif len(parts) > idx_cn + 1:
+                            slug = parts[idx_cn + 1]
+
+                        if not name:
+                            name = slug.replace("-", " ").title()
+
+                        if not slug:
+                            slug = "uncategorized"
+
+                        discovered.append({
+                            "name": name,
+                            "slug": slug,
+                            "url": full_url
+                        })
+
+            if discovered:
+                logger.info(f"Successfully discovered {len(discovered)} categories dynamically.")
+                return discovered
+
+        except Exception as e:
+            logger.warning(f"Dynamic category discovery failed: {e}. Using hardcoded fallback.")
+
+        return fallback
 
     async def run(self, max_categories: Optional[int] = None, categories_to_scrape: Optional[List[str]] = None):
         logger.info(f"Zepto Scraper starting | pincode={self.pincode}")

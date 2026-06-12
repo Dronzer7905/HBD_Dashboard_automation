@@ -126,8 +126,8 @@ class DataCleaner:
         if url.startswith("http"):
             return url
         if url.startswith("/"):
-            return f"https://www.zeptonow.com{url}"
-        return f"https://www.zeptonow.com/{url}"
+            return f"https://www.zepto.com{url}"
+        return f"https://www.zepto.com/{url}"
 
     @staticmethod
     def clean_image_url(url: Optional[str]) -> Optional[str]:
