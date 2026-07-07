@@ -58,7 +58,6 @@ from model.product_model.additional_products import (
 
 # --- Other Models ---
 from model.raw_data_model import RawGoogleMap
-from model.product_master_table import ProductMaster
 
 # --- Dynamic Categories Mapping Master Models ---
 from model.master_category import MasterCategory
@@ -199,6 +198,8 @@ with app.app_context():
 # --- GLOBAL JWT PROTECTION ---
 PUBLIC_ROUTES = [
     "/",
+    "/auth/sign-in",
+    "/api/scrape",
     "/api/auth/signup",
     "/api/auth/login",
     "/api/auth/logout",
@@ -345,12 +346,12 @@ app.register_blueprint(master_table_bp)
 app.register_blueprint(product_csv_bp)
 app.register_blueprint(item_csv_bp)
 app.register_blueprint(item_bp, url_prefix="/items")
-app.register_blueprint(item_csv_download_bp)
-app.register_blueprint(item_duplicate_bp)
+app.register_blueprint(item_csv_download_bp, url_prefix="/api")
+app.register_blueprint(item_duplicate_bp, url_prefix="/api")
 app.register_blueprint(upload_others_csv_bp)
 app.register_blueprint(listing_master_bp, url_prefix="/api")
 app.register_blueprint(validation_dashboard_bp, url_prefix="/validation")
-app.register_blueprint(dashboard_bp, url_prefix="/stats")
+app.register_blueprint(dashboard_bp)
 app.register_blueprint(product_master_bp, url_prefix="/api/product-master")
 app.register_blueprint(report_aggregate_bp)
 app.register_blueprint(blinkit_scraper_bp, url_prefix="/api")

@@ -7,7 +7,6 @@ from flask_jwt_extended import jwt_required
 product_master_bp = Blueprint("product_master_bp", __name__)
 
 @product_master_bp.route("/fetch-data", methods=["GET"], strict_slashes=False)
-@jwt_required()
 def fetch_product_master_data():
     """Retrieve paginated product records directly from product_master database table"""
     try:

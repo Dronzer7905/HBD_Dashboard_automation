@@ -149,7 +149,7 @@
 
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, or_
 from database.session import SessionLocal
 from model.item_csv_model import ItemData
 
@@ -222,7 +222,25 @@ def get_duplicate_items():
             .subquery()
         )
 
-        # Step 2: Join with main table → get only duplicates
+        # Step 2: Subquery to find minimum ID (first occurrence) of each duplicate group
+        min_ids_subquery = (
+            db.query(
+                func.min(ItemData.id).label("min_id")
+            )
+            .group_by(
+                ItemData.name,
+                ItemData.category,
+                ItemData.sub_category,
+                ItemData.email,
+                ItemData.city,
+                ItemData.area,
+                ItemData.address,
+            )
+            .having(func.count(ItemData.id) > 1)
+            .subquery()
+        )
+
+        # Step 3: Join with duplicate groups, and filter where ID != min_id (getting the duplicates we want to show/delete)
         duplicates_query = (
             db.query(ItemData)
             .join(
@@ -237,32 +255,39 @@ def get_duplicate_items():
                     ItemData.address == duplicate_groups.c.address,
                 ),
             )
-            .order_by(ItemData.id)
+            .outerjoin(
+                min_ids_subquery,
+                ItemData.id == min_ids_subquery.c.min_id
+            )
+            .filter(
+                min_ids_subquery.c.min_id.is_(None)
+            )
         )
 
-        # Step 3: Pagination + skip first occurrence from each group
-        result = []
-        group_seen = {}
+        # Apply search and city filters
+        search = request.args.get("search", "").strip()
+        city = request.args.get("city", "").strip()
 
-        for item in duplicates_query.offset(offset).limit(limit).all():
-            key = (
-                item.name,
-                item.category,
-                item.sub_category,
-                item.email,
-                item.city,
-                item.area,
-                item.address,
+        if search:
+            duplicates_query = duplicates_query.filter(
+                or_(
+                    ItemData.name.ilike(f"%{search}%"),
+                    ItemData.category.ilike(f"%{search}%"),
+                    ItemData.sub_category.ilike(f"%{search}%"),
+                    ItemData.area.ilike(f"%{search}%"),
+                    ItemData.address.ilike(f"%{search}%"),
+                )
             )
-            if key not in group_seen:
-                group_seen[key] = True  # keep first
-            else:
-                result.append(serialize(item))  # push only duplicates
+        if city:
+            duplicates_query = duplicates_query.filter(ItemData.city.ilike(f"%{city}%"))
 
-        # Step 4: Count total duplicates (excluding first from each group)
-        total_duplicates = (
-            db.query(func.sum(duplicate_groups.c.count - 1)).scalar()
-        ) or 0
+        # Count total filtered duplicates
+        total_duplicates = duplicates_query.count()
+
+        # Paginate results
+        paginated_duplicates = duplicates_query.order_by(ItemData.id).offset(offset).limit(limit).all()
+
+        result = [serialize(item) for item in paginated_duplicates]
 
         return jsonify({
             "success": True,

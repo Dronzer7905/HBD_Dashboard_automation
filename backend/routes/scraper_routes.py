@@ -166,8 +166,8 @@ def get_google_map_stats():
         from config import config
         engine = create_engine(config.SQLALCHEMY_DATABASE_URI, pool_pre_ping=True)
         with engine.connect() as conn:
-            # Note: We track g_map_master_table and google_Map (raw scraped)
-            total_raw = conn.execute(text("SELECT COUNT(*) FROM google_Map")).scalar()
+            # Note: We track g_map_master_table and google_map (raw scraped)
+            total_raw = conn.execute(text("SELECT COUNT(*) FROM google_map")).scalar()
             total_master = conn.execute(text("SELECT COUNT(*) FROM master_table WHERE data_source = 'Google Maps'")).scalar()
         from flask import jsonify
         return jsonify({

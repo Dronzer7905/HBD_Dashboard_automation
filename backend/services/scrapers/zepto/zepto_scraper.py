@@ -48,18 +48,34 @@ def load_default_pincodes():
     return "400053,560034,110016,122002,500081"
 
 
-def fetch_subcategory_urls():
-    """Fetches all subcategory URLs dynamically from Zepto's sitemap."""
-    print("[+] Fetching categories sitemap...")
+async def fetch_subcategory_urls(browser):
+    """Fetches all subcategory URLs dynamically from Zepto's sitemap using the browser."""
+    print("[+] Fetching categories sitemap dynamically via browser context...")
     url = "https://www.zepto.com/sitemap/categories.xml"
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    context = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        locale="en-US",
+        timezone_id="Asia/Kolkata"
     )
+    page = await context.new_page()
+    xml_data = None
+    
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            xml_data = response.read()
+        response = await page.goto(url, wait_until="load", timeout=30000)
+        if response and response.status == 200:
+            xml_data = await response.body()
+        else:
+            print(f"[!] Failed to fetch sitemap from URL (status: {response.status if response else 'None'})")
+    except Exception as e:
+        print(f"[!] Browser failed to fetch sitemap from URL: {e}")
         
+    await context.close()
+
+    if not xml_data:
+        return []
+
+    try:
         root = ET.fromstring(xml_data)
         namespace = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
         urls = []
@@ -69,8 +85,34 @@ def fetch_subcategory_urls():
                 urls.append(loc.text.strip())
         return urls
     except Exception as e:
-        print(f"[!] Failed to fetch categories sitemap: {e}")
+        print(f"[!] Failed to parse categories sitemap XML: {e}")
         return []
+
+
+async def extract_categories_from_dom(page):
+    """Extracts category URLs directly from the homepage DOM."""
+    print("[+] Extracting categories from the homepage DOM...")
+    try:
+        urls = await page.evaluate("""
+            () => {
+                return Array.from(document.querySelectorAll('a'))
+                    .map(a => a.href)
+                    .filter(href => href.includes('/cn/'));
+            }
+        """)
+        valid_urls = []
+        for url in urls:
+            if url.startswith("http://") or url.startswith("https://"):
+                valid_urls.append(url.strip())
+            elif url.startswith("/cn/"):
+                valid_urls.append(f"https://www.zepto.com{url.strip()}")
+        valid_urls = list(set(valid_urls))
+        print(f"[+] Extracted {len(valid_urls)} unique category URLs from homepage DOM.")
+        return valid_urls
+    except Exception as e:
+        print(f"[!] Failed to extract categories from DOM: {e}")
+        return []
+
 
 
 def get_category_slugs(url):
@@ -329,29 +371,10 @@ async def main(args_list=None):
         print("[+] No category keyword provided. Defaulting to dynamically scraping all categories from sitemap.")
         category_inputs = ["all"]
         
-    all_sitemap_urls = fetch_subcategory_urls()
-    
-    # Process inputs: handle 'all', direct URLs, and category keywords
+    sitemap_failed = False
     urls = []
     is_all = any(cat.lower() == "all" for cat in category_inputs)
-    
-    if is_all:
-        urls = all_sitemap_urls
-        print(f"[+] Scraping ALL categories. Found {len(urls)} subcategory URLs in sitemap.")
-    else:
-        for cat in category_inputs:
-            if cat.startswith("http://") or cat.startswith("https://"):
-                urls.append(cat)
-            else:
-                matched = match_and_filter_urls(cat, all_sitemap_urls)
-                urls.extend(matched)
-        # Deduplicate
-        urls = list(set(urls))
-        
-        if not urls:
-            print(f"[!] No categories or subcategories matched the inputs {category_inputs}. Exiting.")
-            sys.exit(1)
-        print(f"[+] Found {len(urls)} subcategory URLs for matching categories.")
+
 
     # State file setup
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -397,6 +420,31 @@ async def main(args_list=None):
             headless=True,
             args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"]
         )
+
+        # 1. Fetch sitemap dynamically using the browser context to bypass Cloudflare WAF blocks
+        all_sitemap_urls = await fetch_subcategory_urls(browser)
+        
+        if not all_sitemap_urls:
+            print("[!] Sitemap fetch failed. Falling back to dynamic homepage DOM category extraction during run.")
+            sitemap_failed = True
+        else:
+            if is_all:
+                urls = all_sitemap_urls
+                print(f"[+] Scraping ALL categories. Found {len(urls)} subcategory URLs in sitemap.")
+            else:
+                for cat in category_inputs:
+                    if cat.startswith("http://") or cat.startswith("https://"):
+                        urls.append(cat)
+                    else:
+                        matched = match_and_filter_urls(cat, all_sitemap_urls)
+                        urls.extend(matched)
+                urls = list(set(urls))
+                if not urls:
+                    print(f"[!] No categories or subcategories matched the inputs {category_inputs} in sitemap. Falling back to DOM.")
+                    sitemap_failed = True
+                else:
+                    print(f"[+] Found {len(urls)} subcategory URLs for matching categories.")
+
 
         for pincode in pincodes:
             if pincode in completed_pincodes:
@@ -446,6 +494,21 @@ async def main(args_list=None):
                     print(f"[!] Skipping pincode {pincode} due to location setup failure.")
                     await context.close()
                     continue
+                
+                # If sitemap fetch failed, dynamically extract URLs from the homepage DOM
+                if sitemap_failed:
+                    extracted_urls = await extract_categories_from_dom(init_page)
+                    pincode_urls = []
+                    if is_all:
+                        pincode_urls = extracted_urls
+                    else:
+                        for cat in category_inputs:
+                            matched = match_and_filter_urls(cat, extracted_urls)
+                            pincode_urls.extend(matched)
+                    # Deduplicate
+                    pincode_urls = list(set(pincode_urls))
+                else:
+                    pincode_urls = urls
             except Exception as e:
                 print(f"[!] Error loading page for pincode {pincode}: {e}")
                 await context.close()
@@ -458,7 +521,7 @@ async def main(args_list=None):
                 break
                 
             # Scrape each subcategory using this context
-            for url in urls:
+            for url in pincode_urls:
                 if url in completed_urls:
                     print(f"[+] Category URL {url} already completed. Skipping.")
                     continue
