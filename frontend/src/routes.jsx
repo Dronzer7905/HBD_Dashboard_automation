@@ -718,6 +718,12 @@ export const routes = [
             path: "/scrapper/zepto",
             element: <ZeptoScrapper />,
           },
+          {
+            icon: <ShoppingCartIcon {...icon} />,
+            name: "Amazon",
+            path: "/scrapper/amazon",
+            element: <AmazonScraper />,
+          },
           // ... rest of scrappers
           {
             icon: <ShoppingCartIcon {...icon} />,

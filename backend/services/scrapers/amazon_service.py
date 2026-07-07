@@ -3,27 +3,52 @@ import time
 import random
 import json
 import requests
+import argparse
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from fake_useragent import UserAgent
 import re
 from urllib.parse import unquote
+import datetime
+
 # --- App & DB Imports ---
 from extensions import db
 from model.scraper_task import ScraperTask
 from model.product_model.amazon_product import AmazonProduct
 
-# --- TEMPORARY: Keep this for amazon_routes.py compatibility if needed ---
-DB_CONFIG_AMAZON = {
-    'host': 'host.docker.internal',
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'database': os.getenv('DB_NAME'),
-    'port': os.getenv('DB_PORT')
-}
-
 ua = UserAgent()
 BASE_URL = 'https://www.amazon.in'
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+STATE_FILE = os.path.join(BACKEND_DIR, "output", "amazon_scrape_state.json")
+
+def log_msg(level, msg):
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    print(f"{ts} | {level.upper()} | {msg}", flush=True)
+
+def save_state(state):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=4)
+    except Exception as e:
+        log_msg("ERROR", f"Failed to save state: {e}")
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "products_scraped": 0,
+        "products_inserted": 0,
+        "products_updated": 0,
+        "duplicates_prevented": 0,
+        "is_complete": False,
+        "started_at": "",
+        "last_updated": ""
+    }
 
 def get_headers():
     return {
@@ -42,44 +67,33 @@ def get_product_details(url):
         time.sleep(random.uniform(1, 3))
         response = requests.get(url, headers=get_headers())
         
-        # Log if request failed
         if response.status_code != 200:
-            print(f"xx Failed to fetch URL: {url} (Status: {response.status_code})")
+            log_msg("WARNING", f"Failed to fetch URL: {url} (Status: {response.status_code})")
             return None
         
         if 'captcha' in response.text.lower():
-            print("xx Captcha encountered. Skipping.")
+            log_msg("WARNING", "Captcha encountered. Skipping.")
             return None
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. ASIN (Required)
         asin = None
-            
-            # specific patterns for Amazon URLs
-            # We unquote first to handle "sspa" (sponsored) links where the ASIN is encoded like %2Fdp%2F
         clean_url = unquote(url)
-            
-            # Regex: Look for /dp/ or /gp/product/ followed by exactly 10 alphanumeric chars
         match = re.search(r'(?:/dp/|/gp/product/)([A-Z0-9]{10})', clean_url)
             
         if match:
-                asin = match.group(1)
+            asin = match.group(1)
         else:
-                print(f"xx No ASIN found in URL: {url[:60]}...") # Print first 60 chars to debug
-                return None
+            log_msg("WARNING", f"No ASIN found in URL: {url[:60]}...")
+            return None
 
-        # 2. Extract Fields (With Safe Defaults for Strict DB)
         name_elem = soup.select_one("#productTitle") or \
                 soup.select_one("h1#title") or \
                 soup.select_one("h1.a-size-large") or \
                 soup.select_one("h1.a-size-medium") or \
-                    soup.select_one("#titleSection h1")
+                soup.select_one("#titleSection h1")
         name = name_elem.get_text().strip() if name_elem else "Unknown Product"
 
-        # Debugging: If still unknown, print the page title to see what Amazon served
-        if name == "Unknown Product":
-            page_title = soup.title.string.strip() if soup.title else "No Page Title"
         price_elem = soup.select_one('.a-price-whole')
         price = '₹' + price_elem.get_text().strip().replace(',', '') if price_elem else "₹0"
 
@@ -93,62 +107,76 @@ def get_product_details(url):
         brand_elem = soup.select_one('#bylineInfo')
         brand = brand_elem.get_text().strip() if brand_elem else "Unknown Brand"
 
-        # --- RETURN ALL FIELDS (No None Allowed) ---
+        try:
+            price_num = float(price.replace('₹', '').replace(',', '').strip())
+        except:
+            price_num = 0.0
+
         return {
-            'ASIN': asin,
-            'Product_name': name,
-            'price': price,
-            'rating': rating,
-            'Number_of_ratings': 0, 
-            'Brand': brand,
-            'Seller': "Unknown",
-            'category': "Uncategorized",
-            'subcategory': "",
-            'sub_sub_category': "",
-            'category_sub_sub_sub': "",
-            'colour': "",
-            'size_options': "",
-            'description': "",
-            'link': url,
-            'Image_URLs': "",
-            'About_the_items_bullet': "",
-            'Product_details': {},    # Empty JSON dict for Strict DB
-            'Additional_Details': {}, 
-            'Manufacturer_Name': "Unknown"
+            'asin': asin,
+            'title': name,
+            'imgUrl': "",
+            'productUrl': url,
+            'stars': rating,
+            'reviews': 0,
+            'price': price_num,
+            'listPrice': price_num,
+            'categoryName': brand,
+            'isBestSeller': False,
+            'boughtInLastMonth': 0
         }
     except Exception as e:
-        print(f"xx Error scraping {url}: {e}")
+        log_msg("ERROR", f"Error scraping {url}: {e}")
         return None
 
-def scrape_amazon_search(search_term, pages=1, limit=1000):
+def scrape_amazon_search(search_term, pages=1, limit=1000, task_id=None, resume=False):
     from app import app 
     
     with app.app_context():
         try:
-            # Initialize Task
-            task = ScraperTask(
-                platform="Amazon",
-                search_query=search_term, 
-                status="RUNNING",
-                progress=0,
-                total_found=0
-            )
-            db.session.add(task)
-            db.session.commit()
+            state = load_state() if resume else {
+                "products_scraped": 0,
+                "products_inserted": 0,
+                "products_updated": 0,
+                "duplicates_prevented": 0,
+                "is_complete": False,
+                "started_at": datetime.datetime.now().isoformat(),
+                "last_updated": ""
+            }
+
+            task = None
+            if task_id:
+                task = ScraperTask.query.get(task_id)
             
-            print(f"\n>>> TASK STARTED: ID {task.id} | Query: '{search_term}' | Pages: {pages}")
+            if not task:
+                task = ScraperTask(
+                    platform="Amazon",
+                    search_query=search_term, 
+                    status="RUNNING",
+                    progress=0,
+                    total_found=0
+                )
+                db.session.add(task)
+                db.session.commit()
+            else:
+                task.status = "RUNNING"
+                db.session.commit()
             
-            all_products_count = 0
+            log_msg("SYSTEM", f"=== STARTING AMAZON SCRAPER ===")
+            log_msg("INFO", f"Task ID: {task.id} | Query: '{search_term}' | Pages: {pages}")
+            
+            all_products_count = state["products_scraped"]
             
             for page in range(1, pages + 1):
-                # Check for STOP
                 db.session.refresh(task)
-                if task.status in ["STOPPED", "CANCELLED"]:
-                    print(f"!!! Task {task.id} Stopped by User !!!")
+                if task.status in ["STOPPED", "CANCELLED"] or getattr(task, 'should_stop', False):
+                    log_msg("WARNING", f"Task {task.id} Stopped by User")
+                    task.status = "STOPPED"
+                    db.session.commit()
                     break
 
                 search_url = f"{BASE_URL}/s?k={requests.utils.quote(search_term)}&page={page}"
-                print(f"\n--- Scraping Page {page}/{pages} ---")
+                log_msg("SYSTEM", f"--- Phase {page}/{pages}: Scraping Page ---")
                 
                 try:
                     response = requests.get(search_url, headers=get_headers())
@@ -156,7 +184,7 @@ def scrape_amazon_search(search_term, pages=1, limit=1000):
                         soup = BeautifulSoup(response.text, 'html.parser')
                         links = [urljoin(BASE_URL, a['href']) for a in soup.select('a.a-link-normal.s-no-outline') if a.get('href')]
                         
-                        print(f"Found {len(links)} product links on Page {page}.")
+                        log_msg("INFO", f"Found {len(links)} product links on Page {page}.")
                         
                         page_saved_count = 0
                         for link in links:
@@ -164,40 +192,67 @@ def scrape_amazon_search(search_term, pages=1, limit=1000):
                             
                             p_data = get_product_details(link)
                             if p_data:
-                                # Save with SQLAlchemy
-                                existing = AmazonProduct.query.filter_by(ASIN=p_data['ASIN']).first()
+                                existing = AmazonProduct.query.filter_by(asin=p_data['asin']).first()
                                 if not existing:
                                     new_prod = AmazonProduct(**p_data)
                                     db.session.add(new_prod)
                                     all_products_count += 1
                                     page_saved_count += 1
-                                    print(f" [V] Saved: {p_data['Product_name'][:40]}...")
+                                    state["products_inserted"] += 1
+                                    log_msg("SUCCESS", f"Saved: {p_data['title'][:40]}...")
                                 else:
-                                    print(f" [!] Duplicate ASIN skipped: {p_data['ASIN']}")
+                                    state["duplicates_prevented"] += 1
+                                    log_msg("INFO", f"Duplicate ASIN skipped: {p_data['asin']}")
+                                state["products_scraped"] += 1
                             
-                        # Commit batch per page
                         task.progress = int((page / pages) * 100)
                         task.total_found = all_products_count
                         db.session.commit()
-                        print(f"--- Page {page} Commit Success. Total Saved: {all_products_count} ---")
+                        
+                        state["last_updated"] = datetime.datetime.now().isoformat()
+                        save_state(state)
+                        log_msg("SUCCESS", f"Page {page} Commit Success. Total Saved: {all_products_count}")
                     
                     else:
-                        print(f"xx Failed to load Search Page {page}. Status: {response.status_code}")
+                        log_msg("ERROR", f"Failed to load Search Page {page}. Status: {response.status_code}")
 
                 except Exception as e:
-                    print(f"xx Critical Error on Page {page}: {e}")
+                    log_msg("ERROR", f"Critical Error on Page {page}: {e}")
 
                 if all_products_count >= limit: 
-                    print("--- Limit Reached ---")
+                    log_msg("INFO", "--- Limit Reached ---")
                     break
 
-            task.status = "COMPLETED"
-            db.session.commit()
-            print(f"\n>>> TASK COMPLETED: ID {task.id} | Total Products: {all_products_count} <<<\n")
+            if task.status not in ["STOPPED", "CANCELLED"]:
+                task.status = "COMPLETED"
+                task.progress = 100
+                state["is_complete"] = True
+                db.session.commit()
+                log_msg("SUCCESS", f"=== TASK COMPLETED: ID {task.id} | Total Products: {all_products_count} ===")
+            
+            save_state(state)
 
         except Exception as e:
             db.session.rollback()
-            print(f"\nxxx TASK FAILED: {e} xxx\n")
-            task.status = "FAILED"
-            task.error_message = str(e)
-            db.session.commit()
+            log_msg("ERROR", f"TASK FAILED: {e}")
+            if task:
+                task.status = "FAILED"
+                task.error_message = str(e)
+                db.session.commit()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Amazon Subprocess Scraper")
+    parser.add_argument("--search_term", type=str, required=True, help="Search query")
+    parser.add_argument("--pages", type=int, default=1, help="Number of pages to scrape")
+    parser.add_argument("--task_id", type=int, default=None, help="ScraperTask DB ID")
+    parser.add_argument("--resume", action="store_true", help="Resume from last state")
+    
+    args = parser.parse_args()
+    
+    scrape_amazon_search(
+        search_term=args.search_term,
+        pages=args.pages,
+        limit=1000,
+        task_id=args.task_id,
+        resume=args.resume
+    )
