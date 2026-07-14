@@ -48,10 +48,10 @@ def transfer_to_master_table(task_id):
             
             # Fetch recently scraped rows
             # We can select all that are not in master_table or just use ON DUPLICATE KEY UPDATE
-            cursor.execute("SELECT name, address, website, phone_number, reviews_count, reviews_average, category, city, state, area FROM google_Map")
+            cursor.execute("SELECT name, address, website, phone_number, reviews_count, reviews_average, category, city, state, area FROM google_map")
             rows = cursor.fetchall()
             
-            _log_to_file(task_id, f"Found {len(rows)} total records in google_Map to process.", "INFO")
+            _log_to_file(task_id, f"Found {len(rows)} total records in google_map to process.", "INFO")
             
             insert_query = """
             INSERT INTO master_table (
@@ -148,7 +148,7 @@ class BusinessList:
                 cursor = connection.cursor()
                 
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS google_Map (
+                CREATE TABLE IF NOT EXISTS google_map (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(500),
                     address TEXT,
@@ -166,7 +166,7 @@ class BusinessList:
                 )""")
 
                 insert_query_complete_entries = """
-                INSERT INTO google_Map (
+                INSERT INTO google_map (
                     name, address, website, phone_number,
                     reviews_count, reviews_average, category,
                     subcategory, city, state, area
@@ -339,7 +339,7 @@ def run_google_maps_scraper(task_id, app, search_list=None):
                         db.session.commit()
 
                     # Batch Save
-                    _log_to_file(task_id, f"Saving {len(business_list.business_list)} records to google_Map...", "SYSTEM")
+                    _log_to_file(task_id, f"Saving {len(business_list.business_list)} records to google_map...", "SYSTEM")
                     business_list.save_to_mysql()
                     task.last_index = search_for_index + 1
                     db.session.commit()
