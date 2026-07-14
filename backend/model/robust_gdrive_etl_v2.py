@@ -361,11 +361,11 @@ class GDriveHighSpeedIngestor:
                         break
                 self.scanners_finished.set()
 
-            # Step 3: Explicitly Re-dispatch ERROR, PENDING, and IN_PROGRESS files (Recovery Phase)
+            # Step 3: Explicitly Re-dispatch ERROR files (Recovery Phase)
             with self.engine.connect() as conn:
-                error_files = conn.execute(text("SELECT drive_file_id, filename, drive_folder_id, folder_name, path, modified_time FROM file_registry WHERE status IN ('ERROR', 'PENDING', 'IN_PROGRESS')")).fetchall()
+                error_files = conn.execute(text("SELECT drive_file_id, filename, drive_folder_id, folder_name, path, modified_time FROM file_registry WHERE status IN ('ERROR')")).fetchall()
                 if error_files:
-                    logger.info(f"🔄 [RECOVERY] Re-dispatching {len(error_files)} files in ERROR/PENDING/IN_PROGRESS status...")
+                    logger.info(f"🟡 [RECOVERY] Re-dispatching {len(error_files)} files in ERROR status...")
                     from tasks.gdrive_task.etl_tasks import process_csv_task
                     for f in error_files:
                         process_csv_task.delay(

@@ -68,8 +68,39 @@ def start_deep_scrape():
     db.session.add(new_task)
     db.session.commit()
 
-    # 2. Dispatch scraper to Celery worker
-    run_deep_scraper.delay(new_task.id)
+    # 2. Dispatch scraper as a background process (like other scrapers)
+    import sys
+    import os
+    import subprocess
+    
+    backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    log_dir = os.path.join(backend_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, f"google_map_task_{new_task.id}.log")
+    
+    script = f"""
+import sys
+import os
+sys.path.insert(0, r'{backend_dir}')
+from app import app
+from services.scrapers.google_maps_service import run_google_maps_scraper
+run_google_maps_scraper({new_task.id}, app)
+"""
+    cmd = [sys.executable, "-u", "-c", script.strip()]
+    
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    
+    log_file = open(log_file_path, "a", encoding="utf-8")
+    subprocess.Popen(
+        cmd,
+        cwd=backend_dir,
+        env=env,
+        stdout=log_file,
+        stderr=log_file
+    )
 
     return jsonify({"message": "Deep Scraper Started", "task_id": new_task.id}), 202
 
