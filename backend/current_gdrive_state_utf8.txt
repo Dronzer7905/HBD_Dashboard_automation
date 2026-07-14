@@ -1,3 +1,0 @@
-﻿
-==================================================
-Error fetching status: 'charmap' codec can't encode character '\U0001f4ca' in position 1: character maps to <undefined>
