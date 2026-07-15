@@ -1,20 +1,19 @@
 {
-  "run_id": 17,
+  "run_id": 18,
   "status": "running",
   "total_categories": 77,
   "completed_categories": [
-    5,
-    14,
+    3,
     13,
-    16,
     4,
     17,
+    14,
+    16,
+    5,
     15,
-    3,
     20,
     24,
-    25,
-    22
+    25
   ],
   "target_categories": [
     3,

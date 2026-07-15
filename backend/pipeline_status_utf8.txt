@@ -1,4 +1,0 @@
-﻿Raw Count: 5339043
-Clean Count: 5339241
-G-Map Master Count: 1675814
-Last Processed ID: 6783777

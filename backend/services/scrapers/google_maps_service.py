@@ -16,7 +16,7 @@ from model.scraper_task import ScraperTask
 def _log_to_file(task_id, message, level="INFO"):
     """Appends logs to a local file for terminal streaming."""
     try:
-        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         log_dir = os.path.join(backend_dir, "logs")
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
@@ -48,10 +48,10 @@ def transfer_to_master_table(task_id):
             
             # Fetch recently scraped rows
             # We can select all that are not in master_table or just use ON DUPLICATE KEY UPDATE
-            cursor.execute("SELECT name, address, website, phone_number, reviews_count, reviews_average, category, city, state, area FROM google_map")
+            cursor.execute("SELECT name, address, website, phone_number, reviews_count, reviews_average, category, city, state, area FROM temp_google_map_scrape")
             rows = cursor.fetchall()
             
-            _log_to_file(task_id, f"Found {len(rows)} total records in google_map to process.", "INFO")
+            _log_to_file(task_id, f"Found {len(rows)} total records in temp_google_map_scrape to process.", "INFO")
             
             insert_query = """
             INSERT INTO master_table (
@@ -69,8 +69,9 @@ def transfer_to_master_table(task_id):
             for r in rows:
                 name, addr, web, phone, rev_c, rev_a, cat, city, state, area = r
                 if not name: continue
-                # Generate a unique business ID
-                b_id = str(uuid.uuid4())
+                import random
+                # Generate a unique business ID as an integer since global_business_id is INT in the database
+                b_id = random.randint(100000000, 2147483647)
                 try:
                     cursor.execute(insert_query, (b_id, name, addr, web, phone, rev_c, rev_a, cat, city, state, area))
                     success_count += 1
@@ -148,7 +149,7 @@ class BusinessList:
                 cursor = connection.cursor()
                 
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS google_map (
+                CREATE TABLE IF NOT EXISTS temp_google_map_scrape (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(500),
                     address TEXT,
@@ -166,7 +167,7 @@ class BusinessList:
                 )""")
 
                 insert_query_complete_entries = """
-                INSERT INTO google_map (
+                INSERT INTO temp_google_map_scrape (
                     name, address, website, phone_number,
                     reviews_count, reviews_average, category,
                     subcategory, city, state, area
@@ -204,6 +205,44 @@ class BusinessList:
             if connection and connection.is_connected():
                 connection.close()
 
+def recreate_staging_table(task_id):
+    """Drops and recreates the temporary staging table to ensure schema matches the script when starting fresh."""
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        if connection.is_connected():
+            cursor = connection.cursor()
+            cursor.execute("DROP TABLE IF EXISTS temp_google_map_scrape")
+            cursor.execute("""
+            CREATE TABLE temp_google_map_scrape (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(500),
+                address TEXT,
+                website VARCHAR(500),
+                phone_number VARCHAR(100),
+                reviews_count INT,
+                reviews_average FLOAT,
+                category VARCHAR(255),
+                subcategory VARCHAR(500),
+                city VARCHAR(100),
+                state VARCHAR(100),
+                area VARCHAR(500),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_business (name,address(255))
+            )""")
+            connection.commit()
+            _log_to_file(task_id, "[SYSTEM] Successfully rebuilt staging table for a fresh run.", "INFO")
+    except Exception as e:
+        _log_to_file(task_id, f"[ERROR] Failed to recreate staging table: {e}", "ERROR")
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
 def run_google_maps_scraper(task_id, app, search_list=None):
     """
     Runs the Playwright scraper.
@@ -230,6 +269,9 @@ def run_google_maps_scraper(task_id, app, search_list=None):
         _log_to_file(task_id, f"[CONFIG] Scrape targets: {search_list}", "INFO")
 
         start_from_index = task.last_index if task.last_index else 0
+        if start_from_index == 0:
+            recreate_staging_table(task_id)
+
         task.status = "RUNNING"
         task.should_stop = False
         db.session.commit()
@@ -339,7 +381,7 @@ def run_google_maps_scraper(task_id, app, search_list=None):
                         db.session.commit()
 
                     # Batch Save
-                    _log_to_file(task_id, f"Saving {len(business_list.business_list)} records to google_map...", "SYSTEM")
+                    _log_to_file(task_id, f"Saving {len(business_list.business_list)} records to temp_google_map_scrape...", "SYSTEM")
                     business_list.save_to_mysql()
                     task.last_index = search_for_index + 1
                     db.session.commit()

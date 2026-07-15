@@ -716,6 +716,53 @@ def run_pending_migrations(app):
                 except Exception as blinkit_mig_err:
                     logger.error(f"❌ Blinkit Category/Product MySQL migration failed: {blinkit_mig_err}")
 
+                # === Scraper Tasks Table Migrations ===
+                try:
+                    if table_exists('scraper_tasks'):
+                        scraper_tasks_cols = [
+                            ("query", "VARCHAR(255) NULL"),
+                            ("total_leads", "INT DEFAULT 0"),
+                            ("location", "VARCHAR(255) NULL"),
+                            ("status", "VARCHAR(255) DEFAULT 'PENDING'"),
+                            ("progress", "INT DEFAULT 0"),
+                            ("last_index", "INT DEFAULT 0"),
+                            ("should_stop", "TINYINT(1) DEFAULT 0"),
+                            ("error_message", "TEXT NULL"),
+                            ("created_at", "DATETIME NULL")
+                        ]
+                        for col_name, col_type in scraper_tasks_cols:
+                            try:
+                                col_check = text(f"""
+                                    SELECT COUNT(*) FROM information_schema.COLUMNS 
+                                    WHERE TABLE_SCHEMA = DATABASE() 
+                                    AND TABLE_NAME = 'scraper_tasks' 
+                                    AND COLUMN_NAME = '{col_name}'
+                                """)
+                                if conn.execute(col_check).scalar() == 0:
+                                    logger.info(f"⚠️ Column `{col_name}` missing in `scraper_tasks`. Adding column...")
+                                    conn.execute(text(f"ALTER TABLE scraper_tasks ADD COLUMN {col_name} {col_type}"))
+                                    logger.info(f"✅ Column `{col_name}` successfully added to `scraper_tasks`.")
+                            except Exception as col_err:
+                                logger.error(f"❌ Failed to add `{col_name}` to `scraper_tasks`: {col_err}")
+
+                        # Ensure status column is VARCHAR(255) to support long progress status strings
+                        try:
+                            status_len_check = text("""
+                                SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS 
+                                WHERE TABLE_SCHEMA = DATABASE() 
+                                AND TABLE_NAME = 'scraper_tasks' 
+                                AND COLUMN_NAME = 'status'
+                            """)
+                            max_len = conn.execute(status_len_check).scalar()
+                            if max_len is not None and max_len < 255:
+                                logger.info("⚠️ Column `status` in `scraper_tasks` is too short. Upgrading to VARCHAR(255)...")
+                                conn.execute(text("ALTER TABLE scraper_tasks MODIFY COLUMN status VARCHAR(255) DEFAULT 'PENDING'"))
+                                logger.info("✅ Column `status` successfully modified to VARCHAR(255).")
+                        except Exception as status_err:
+                            logger.error(f"❌ Failed to upgrade `status` column in `scraper_tasks`: {status_err}")
+                except Exception as scraper_task_mig_err:
+                    logger.error(f"❌ Scraper Tasks MySQL migration failed: {scraper_task_mig_err}")
+
             print("[Migrations] DB Migrations check complete.")
             
         except Exception as e:

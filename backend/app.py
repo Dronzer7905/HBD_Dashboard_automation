@@ -164,6 +164,14 @@ with app.app_context():
             break
         except Exception as e:
             try:
+                db.session.rollback()
+            except Exception:
+                pass
+            try:
+                db.session.remove()
+            except Exception:
+                pass
+            try:
                 print(f"⚠️ DATABASE CONNECTION ATTEMPT {attempt}/{max_retries} FAILED! Error: {e}")
             except UnicodeEncodeError:
                 print(f"[WARNING] DATABASE CONNECTION ATTEMPT {attempt}/{max_retries} FAILED! Error: {e}")
