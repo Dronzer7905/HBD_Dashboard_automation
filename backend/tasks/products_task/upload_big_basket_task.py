@@ -21,4 +21,11 @@ def process_big_basket_task(self,file_paths):
     except Exception as e:
         print(f"[CategoryAutoSync] Error running sync for BigBasket: {e}")
 
+    # Consolidate new BigBasket products directly into product_master table
+    try:
+        from services.sync_to_product_master import sync_platform_to_master
+        sync_platform_to_master('BigBasket')
+    except Exception as e:
+        print(f"[ProductMasterSync] Error running master sync for BigBasket: {e}")
+
     return result

@@ -22,4 +22,11 @@ def process_dmart_task(self,file_paths):
     except Exception as e:
         print(f"[CategoryAutoSync] Error running sync for DMart: {e}")
 
+    # Consolidate new DMart products directly into product_master table
+    try:
+        from services.sync_to_product_master import sync_platform_to_master
+        sync_platform_to_master('DMart')
+    except Exception as e:
+        print(f"[ProductMasterSync] Error running master sync for DMart: {e}")
+
     return result

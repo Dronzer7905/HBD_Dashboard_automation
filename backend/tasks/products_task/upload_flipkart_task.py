@@ -22,4 +22,11 @@ def process_flipkart_products_task(self,file_paths):
     except Exception as e:
         print(f"[CategoryAutoSync] Error running sync for Flipkart: {e}")
 
+    # Consolidate new Flipkart products directly into product_master table
+    try:
+        from services.sync_to_product_master import sync_platform_to_master
+        sync_platform_to_master('Flipkart')
+    except Exception as e:
+        print(f"[ProductMasterSync] Error running master sync for Flipkart: {e}")
+
     return result
