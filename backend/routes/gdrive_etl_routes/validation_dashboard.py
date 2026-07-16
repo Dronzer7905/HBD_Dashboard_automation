@@ -240,3 +240,58 @@ def get_validation_report():
     except Exception as e:
         logger.error(f"🔥 Report API error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 🔄 SYNC OPERATIONS — Trigger GDrive Sync from UI
+# ═══════════════════════════════════════════════════════════════════
+
+import threading
+from force_sync_missing_rows import process_missing_rows
+
+# Concurrency locks
+is_syncing = False
+sync_lock = threading.Lock()
+
+@validation_dashboard_bp.route("/api/validation/sync-now", methods=["POST"])
+def trigger_sync():
+    global is_syncing
+    with sync_lock:
+        if is_syncing:
+            return jsonify({
+                "status": "busy", 
+                "message": "A database sync is already in progress in the background."
+            }), 400
+        is_syncing = True
+
+    def run_sync():
+        global is_syncing
+        try:
+            logger.info("🔄 UI-triggered GDrive database sync started in the background.")
+            process_missing_rows()
+            logger.info("✅ UI-triggered GDrive database sync completed successfully.")
+        except Exception as se:
+            logger.error(f"🔥 UI-triggered GDrive database sync failed: {se}")
+        finally:
+            with sync_lock:
+                is_syncing = False
+
+    # Start the task in a background thread to prevent Gateway Timeout
+    thread = threading.Thread(target=run_sync)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        "status": "success", 
+        "message": "Database sync started successfully in the background."
+    }), 202
+
+
+@validation_dashboard_bp.route("/api/validation/sync-status", methods=["GET"])
+def get_sync_status():
+    global is_syncing
+    return jsonify({
+        "status": "success",
+        "is_syncing": is_syncing
+    })
+

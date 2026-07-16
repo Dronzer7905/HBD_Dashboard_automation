@@ -163,6 +163,7 @@ with app.app_context():
             db.session.remove()
             break
         except Exception as e:
+            db.session.rollback()
             try:
                 db.session.rollback()
             except Exception:

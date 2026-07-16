@@ -506,6 +506,7 @@ def run_pending_migrations(app):
                     pass
 
                 except Exception as dmart_mig_err:
+                    conn.rollback()
                     logger.error(f"❌ DMart Category/Product MySQL migration failed: {dmart_mig_err}")
 
                 # === JioMart Category and Product Tables Schema Migration ===
@@ -553,6 +554,7 @@ def run_pending_migrations(app):
                         logger.info("✅ Table `jiomart_products` created successfully.")
 
                 except Exception as jiomart_mig_err:
+                    conn.rollback()
                     logger.error(f"❌ JioMart Category/Product MySQL migration failed: {jiomart_mig_err}")
 
                 # === Blinkit Category Mapping Table and Schema Upgrade ===
@@ -714,6 +716,7 @@ def run_pending_migrations(app):
                             logger.info(f"✅ Backfill complete. Remaining unmapped products: {updated_null_check}")
 
                 except Exception as blinkit_mig_err:
+                    conn.rollback()
                     logger.error(f"❌ Blinkit Category/Product MySQL migration failed: {blinkit_mig_err}")
 
                 # === Scraper Tasks Table Migrations ===

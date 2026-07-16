@@ -11,7 +11,8 @@ sys.path.insert(0, os.getcwd())
 from model.normalizer import UniversalNormalizer
 
 load_dotenv()
-DATABASE_URI = f"mysql+pymysql://{os.getenv('DB_USER')}:{quote_plus(os.getenv('DB_PASSWORD_PLAIN','') or '')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT', '3306')}/{os.getenv('DB_NAME')}"
+db_pass = os.getenv('DB_PASSWORD_PLAIN') or os.getenv('DB_PASSWORD') or ''
+DATABASE_URI = f"mysql+pymysql://{os.getenv('DB_USER')}:{quote_plus(db_pass)}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT', '3306')}/{os.getenv('DB_NAME')}"
 engine = create_engine(DATABASE_URI)
 
 def safe_str(val, default=""):
@@ -61,7 +62,7 @@ def validate_row(row):
     return is_structured, is_valid, missing, invalid_fields
 
 def process_missing_rows():
-    batch_size = 50000
+    batch_size = 10000
     with engine.connect() as conn:
         print("Checking table counts to verify no rows are missing...")
         raw_count = conn.execute(text("SELECT COUNT(id) FROM raw_google_map_drive_data")).scalar()
@@ -99,6 +100,7 @@ def process_missing_rows():
             print(f"Processing batch of {len(rows)} rows...")
             clean_batch = []
             master_batch = []
+            seen_in_batch = set()
             
             for r in rows:
                 row_dict = r._asdict() if hasattr(r, '_asdict') else r._mapping
@@ -115,19 +117,23 @@ def process_missing_rows():
                 
                 is_structured, is_valid, missing, invalid = validate_row(norm_row)
                 
-                # Check for duplicate in clean table
+                # Check for duplicate in clean table or within current batch
                 dup_check = conn.execute(text("SELECT 1 FROM raw_clean_google_map_data WHERE signature_hash = :h LIMIT 1"), {"h": sig_hash}).fetchone()
-                is_duplicate = dup_check is not None
+                is_duplicate = (dup_check is not None) or (sig_hash in seen_in_batch)
+                seen_in_batch.add(sig_hash)
                 
                 status = "VALID"
                 if not is_structured: status = "MISSING"
                 elif is_duplicate: status = "DUPLICATE"
                 elif not is_valid: status = "INVALID"
                 
+                # Create a guaranteed unique name for the clean table log to bypass MySQL case/space collation differences
+                clean_name = f"{norm_row['name']} (Record #{norm_row['id']})"
+                
                 created_at = row_dict.get('created_at') or datetime.now()
                 
                 clean_batch.append({
-                    "raw_id": norm_row['id'], "sig_hash": sig_hash, "name": norm_row['name'], "address": norm_row['address'],
+                    "raw_id": norm_row['id'], "sig_hash": sig_hash, "name": clean_name, "address": norm_row['address'],
                     "website": norm_row['website'], "phone": norm_row['phone_number'], 
                     "reviews": safe_int(norm_row.get('reviews_count', 0)),
                     "avg": safe_float(norm_row.get('reviews_average', 0.00)),
