@@ -194,7 +194,7 @@ async def set_location(page, pincode):
     """Sets the user location on Zepto using a pincode."""
     print(f"[+] Setting location to pincode: {pincode}...")
     try:
-        location_btn = page.locator("[data-testid='user-address']").first
+        location_btn = page.locator("[data-testid='user-address'], button[aria-label='Select Location']").first
         await location_btn.wait_for(state="visible", timeout=20000)
         
         # Click retry loop to handle event listener attachment delays
@@ -255,10 +255,10 @@ async def set_location(page, pincode):
     except Exception as e:
         print(f"[!] Failed to set location to {pincode}: {e}")
         try:
-            await page.screenshot(path="set_location_error.png")
-            print("[+] Error screenshot saved to set_location_error.png")
-        except Exception as se:
-            print(f"[!] Failed to save error screenshot: {se}")
+            await page.screenshot(path="zepto_error_debug.png")
+            print("[+] Saved error debug screenshot to zepto_error_debug.png")
+        except Exception:
+            pass
         return False
 
 
@@ -418,7 +418,7 @@ async def main(args_list=None):
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"]
+            args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox", "--disable-blink-features=AutomationControlled"]
         )
 
         # 1. Fetch sitemap dynamically using the browser context to bypass Cloudflare WAF blocks
@@ -457,12 +457,30 @@ async def main(args_list=None):
                 
             print(f"\n[=] Starting scrape cycle for pincode: {pincode} [=]")
             
-            # Create a context for the pincode with standard desktop viewport
+            # Coordinates mapping for common Indian pincodes to mock geolocation
+            pincode_coords = {
+                "560001": {"latitude": 12.9716, "longitude": 77.5946},
+                "560034": {"latitude": 12.9304, "longitude": 77.6226},
+                "411033": {"latitude": 18.5987, "longitude": 73.7888},
+                "411001": {"latitude": 18.5204, "longitude": 73.8567},
+                "110001": {"latitude": 28.6139, "longitude": 77.2090},
+                "110016": {"latitude": 28.5463, "longitude": 77.1950},
+                "400001": {"latitude": 18.9220, "longitude": 72.8347},
+                "400053": {"latitude": 19.1311, "longitude": 72.8252},
+                "122002": {"latitude": 28.4595, "longitude": 77.0266},
+                "500081": {"latitude": 17.4435, "longitude": 78.3813}
+            }
+            # Default to Bangalore if pincode is unknown
+            coords = pincode_coords.get(str(pincode).strip(), {"latitude": 12.9716, "longitude": 77.5946})
+            
+            # Create a context for the pincode with standard desktop viewport and mocked geolocation
             context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 locale="en-US",
-                timezone_id="Asia/Kolkata"
+                timezone_id="Asia/Kolkata",
+                geolocation=coords,
+                permissions=["geolocation"]
             )
             
             # Open homepage and set location
