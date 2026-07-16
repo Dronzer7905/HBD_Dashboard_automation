@@ -41,6 +41,37 @@ const ValidationDashboard = () => {
     const [totalErrors, setTotalErrors] = useState(0);
     const [totalClean, setTotalClean] = useState(0);
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const [syncing, setSyncing] = useState(false);
+
+    // Fetch Google Drive sync status
+    const fetchSyncStatus = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/validation/sync-status`);
+            const json = await res.json();
+            if (json.status === "success") {
+                setSyncing(json.is_syncing);
+            }
+        } catch (err) { console.error("Sync status error:", err); }
+    }, []);
+
+    // Trigger Google Drive sync
+    const triggerSync = async () => {
+        if (syncing) return;
+        setSyncing(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/validation/sync-now`, { method: 'POST' });
+            const json = await res.json();
+            if (json.status === "success") {
+                alert("Google Drive sync started in background!");
+            } else {
+                alert("Failed: " + json.message);
+                setSyncing(false);
+            }
+        } catch (err) {
+            console.error("Sync trigger error:", err);
+            setSyncing(false);
+        }
+    };
 
     // Fetch main dashboard data
     const fetchDashboard = useCallback(async () => {
@@ -80,7 +111,11 @@ const ValidationDashboard = () => {
         } catch (err) { console.error("Clean fetch error:", err); }
     }, [cleanPage]);
 
-    useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+    useEffect(() => { 
+        fetchDashboard(); 
+        fetchSyncStatus();
+    }, [fetchDashboard, fetchSyncStatus]);
+    
     useEffect(() => { if (viewMode === 'errors') fetchErrors(); }, [viewMode, fetchErrors]);
     useEffect(() => { if (viewMode === 'clean') fetchClean(); }, [viewMode, fetchClean]);
 
@@ -89,11 +124,12 @@ const ValidationDashboard = () => {
         if (!autoRefresh) return;
         const interval = setInterval(() => {
             fetchDashboard();
+            fetchSyncStatus();
             if (viewMode === 'errors') fetchErrors();
             if (viewMode === 'clean') fetchClean();
         }, 10000);
         return () => clearInterval(interval);
-    }, [autoRefresh, fetchDashboard, fetchErrors, fetchClean, viewMode]);
+    }, [autoRefresh, fetchDashboard, fetchSyncStatus, fetchErrors, fetchClean, viewMode]);
 
     if (loading || !dashData) {
         return (
@@ -167,6 +203,15 @@ const ValidationDashboard = () => {
                         className="flex items-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black tracking-wider bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 transition-all"
                     >
                         <ArrowPathIcon className="w-4 h-4" /> REFRESH
+                    </button>
+
+                    {/* Google Drive sync button */}
+                    <button
+                        onClick={triggerSync}
+                        disabled={syncing}
+                        className={`flex items-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black tracking-wider transition-all border ${syncing ? 'bg-amber-50 text-amber-600 border-amber-200 cursor-not-allowed' : 'bg-violet-50 text-violet-600 border-violet-200 hover:bg-violet-100'}`}
+                    >
+                        <ArrowPathIcon className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'SYNCING...' : 'SYNC GOOGLE'}
                     </button>
 
                     {/* Nav toggle */}

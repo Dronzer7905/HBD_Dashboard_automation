@@ -196,8 +196,11 @@ const CleanProductMaster = () => {
                 <option value="amazon">Amazon</option>
                 <option value="flipkart">Flipkart</option>
                 <option value="bigbasket">BigBasket</option>
-                <option value="jio-mart">Jio Mart</option>
-                <option value="d-mart">D-Mart</option>
+                <option value="blinkit">Blinkit</option>
+                <option value="zepto">Zepto</option>
+                <option value="jiomart">JioMart</option>
+                <option value="dmart">DMart</option>
+                <option value="indiamart">IndiaMART</option>
               </select>
             </div>
           </div>

@@ -38,13 +38,65 @@ const DataCleaningDashboard = () => {
   const [safeTablesLoading, setSafeTablesLoading] = useState(false);
   const [safeTablesError, setSafeTablesError] = useState("");
   const [safeResult, setSafeResult] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchSyncStatus = async () => {
+    try {
+      const res = await api.get("/validation/sync-status");
+      if (res.data.status === "success") {
+        setSyncing(res.data.is_syncing);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const triggerSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const res = await api.post("/validation/sync-now");
+      if (res.data.status === "success") {
+        setMessage({ type: "success", text: "Google Drive sync started in background!" });
+      } else {
+        setMessage({ type: "error", text: "Failed to start Google Drive sync: " + res.data.message });
+        setSyncing(false);
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: "Error starting Google Drive sync." });
+      setSyncing(false);
+    }
+  };
 
   // Load metrics & history
   useEffect(() => {
     fetchData();
     fetchHistory();
     fetchSafeTables();
+    fetchSyncStatus();
   }, []);
+
+  // Poll sync status if syncing is active
+  useEffect(() => {
+    let intervalId;
+    if (syncing) {
+      intervalId = setInterval(async () => {
+        try {
+          const res = await api.get("/validation/sync-status");
+          if (res.data.status === "success") {
+            if (!res.data.is_syncing) {
+              setSyncing(false);
+              fetchData();
+              setMessage({ type: "success", text: "Google Drive sync completed successfully!" });
+            }
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }, 5000);
+    }
+    return () => clearInterval(intervalId);
+  }, [syncing]);
 
   // Poll active background task if exists
   useEffect(() => {
@@ -246,6 +298,19 @@ const DataCleaningDashboard = () => {
             <option value="master_table">Listing Data (master_table)</option>
             <option value="product_master">Product Data (product_master)</option>
           </select>
+
+          {/* Google Sync Button */}
+          <Button
+            size="sm"
+            color={syncing ? "amber" : "purple"}
+            className="flex items-center gap-2 font-semibold"
+            onClick={triggerSync}
+            disabled={loading || syncing || (activeTask && activeTask.status === "running")}
+          >
+            <ArrowPathIcon className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing..." : "Sync Google"}
+          </Button>
+
           <Button
             size="sm"
             color="blue"
