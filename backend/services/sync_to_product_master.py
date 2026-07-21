@@ -79,19 +79,19 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'Zepto' AS marketplace_name,
-                sku_id AS asin,
-                product_name,
-                SUBSTRING_INDEX(product_name, ' ', 1) AS brand,
+                CONVERT(sku_id USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
+                CONVERT(SUBSTRING_INDEX(product_name, ' ', 1) USING utf8mb4) COLLATE utf8mb4_general_ci AS brand,
                 selling_price AS price,
                 mrp AS list_price,
                 rating AS stars,
                 review AS reviews,
                 'In Stock' AS availability,
-                main_category AS category_name,
-                subcategory AS sub_category_name,
-                image_url AS img_url,
-                product_url,
-                product_description AS description,
+                CONVERT(main_category USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
+                CONVERT(subcategory USING utf8mb4) COLLATE utf8mb4_general_ci AS sub_category_name,
+                CONVERT(image_url USING utf8mb4) COLLATE utf8mb4_general_ci AS img_url,
+                CONVERT(product_url USING utf8mb4) COLLATE utf8mb4_general_ci AS product_url,
+                CONVERT(product_description USING utf8mb4) COLLATE utf8mb4_general_ci AS description,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM zepto
@@ -114,17 +114,17 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'Blinkit' AS marketplace_name,
-                product_id AS asin,
-                product_name,
-                brand,
+                CONVERT(product_id USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
+                CONVERT(brand USING utf8mb4) COLLATE utf8mb4_general_ci AS brand,
                 price,
                 mrp AS list_price,
                 NULL AS stars,
                 NULL AS reviews,
                 'In Stock' AS availability,
-                category AS category_name,
-                image_url AS img_url,
-                product_url,
+                CONVERT(category USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
+                CONVERT(image_url USING utf8mb4) COLLATE utf8mb4_general_ci AS img_url,
+                CONVERT(product_url USING utf8mb4) COLLATE utf8mb4_general_ci AS product_url,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM blinkit
@@ -144,15 +144,15 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'DMart' AS marketplace_name,
-                ASIN AS asin,
-                Product_name,
-                Brand,
+                CONVERT(ASIN USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(Product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
+                CONVERT(Brand USING utf8mb4) COLLATE utf8mb4_general_ci AS brand,
                 price,
                 listPrice AS list_price,
                 IF(availability = 1, 'In Stock', 'Out of Stock') AS availability,
-                category AS category_name,
-                Image_URLs AS img_url,
-                link AS product_url,
+                CONVERT(category USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
+                CONVERT(Image_URLs USING utf8mb4) COLLATE utf8mb4_general_ci AS img_url,
+                CONVERT(link USING utf8mb4) COLLATE utf8mb4_general_ci AS product_url,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM dmart_products
@@ -173,17 +173,17 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'BigBasket' AS marketplace_name,
-                CAST(sku_id AS CHAR) AS asin,
-                product_name,
-                SUBSTRING_INDEX(product_name, ' ', 1) AS brand,
+                CONVERT(sku_id USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
+                CONVERT(SUBSTRING_INDEX(product_name, ' ', 1) USING utf8mb4) COLLATE utf8mb4_general_ci AS brand,
                 selling_price AS price,
                 mrp AS list_price,
                 rating AS stars,
                 review AS reviews,
                 'In Stock' AS availability,
-                main_category AS category_name,
+                CONVERT(main_category USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
                 NULL AS img_url,
-                product_url,
+                CONVERT(product_url USING utf8mb4) COLLATE utf8mb4_general_ci AS product_url,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM bigbasket
@@ -204,19 +204,19 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'Flipkart' AS marketplace_name,
-                product_id AS asin,
-                product_name,
-                brand,
+                CONVERT(product_id USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
+                CONVERT(brand USING utf8mb4) COLLATE utf8mb4_general_ci AS brand,
                 price,
                 mrp AS list_price,
                 discount,
                 rating AS stars,
                 CAST(NULLIF(REGEXP_REPLACE(reviews, '[^0-9]', ''), '') AS SIGNED) AS reviews,
                 'In Stock' AS availability,
-                main_category AS category_name,
-                subcategory AS sub_category_name,
-                image_url AS img_url,
-                product_url,
+                CONVERT(main_category USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
+                CONVERT(subcategory USING utf8mb4) COLLATE utf8mb4_general_ci AS sub_category_name,
+                CONVERT(image_url USING utf8mb4) COLLATE utf8mb4_general_ci AS img_url,
+                CONVERT(product_url USING utf8mb4) COLLATE utf8mb4_general_ci AS product_url,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM flipkart_products_new
@@ -239,13 +239,13 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'IndiaMART' AS marketplace_name,
-                asin,
-                product_name,
+                CONVERT(asin USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
                 CAST(NULLIF(REGEXP_SUBSTR(Price, '[0-9]+(\\\\.[0-9]+)?'), '') AS DECIMAL(12,2)) AS price,
                 stars,
-                description,
-                category_name,
-                sub_category_name,
+                CONVERT(description USING utf8mb4) COLLATE utf8mb4_general_ci AS description,
+                CONVERT(category_name USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
+                CONVERT(sub_category_name USING utf8mb4) COLLATE utf8mb4_general_ci AS sub_category_name,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM indiamart_products
@@ -265,14 +265,14 @@ def sync_platform_to_master(platform_name: str):
             )
             SELECT 
                 'JioMart' AS marketplace_name,
-                sku_id AS asin,
-                product_name,
-                brand,
+                CONVERT(sku_id USING utf8mb4) COLLATE utf8mb4_general_ci AS asin,
+                CONVERT(product_name USING utf8mb4) COLLATE utf8mb4_general_ci AS product_name,
+                CONVERT(brand USING utf8mb4) COLLATE utf8mb4_general_ci AS brand,
                 price,
                 mrp AS list_price,
                 'In Stock' AS availability,
-                image_url AS img_url,
-                product_url,
+                CONVERT(image_url USING utf8mb4) COLLATE utf8mb4_general_ci AS img_url,
+                CONVERT(product_url USING utf8mb4) COLLATE utf8mb4_general_ci AS product_url,
                 'PENDING' AS cleaning_status,
                 NOW(), NOW()
             FROM jiomart_products
