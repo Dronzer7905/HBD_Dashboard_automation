@@ -211,7 +211,7 @@ def sync_platform_to_master(platform_name: str):
                 mrp AS list_price,
                 discount,
                 rating AS stars,
-                CAST(NULLIF(REGEXP_REPLACE(reviews, '[^0-9]', ''), '') AS SIGNED) AS reviews,
+                LEAST(COALESCE(CAST(NULLIF(REGEXP_SUBSTR(reviews, '[0-9]+'), '') AS UNSIGNED), 0), 2147483647) AS reviews,
                 'In Stock' AS availability,
                 CONVERT(main_category USING utf8mb4) COLLATE utf8mb4_general_ci AS category_name,
                 CONVERT(subcategory USING utf8mb4) COLLATE utf8mb4_general_ci AS sub_category_name,
