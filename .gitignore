@@ -1,4 +1,5 @@
 .env
+backend/sync_local_to_live.py
 __pycache__/
 *.pyc
 .DS_Store
