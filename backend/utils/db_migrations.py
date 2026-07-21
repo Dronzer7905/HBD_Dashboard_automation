@@ -200,6 +200,18 @@ def run_pending_migrations(app):
                 else:
                     logger.warning(f"⏩ Table `{TARGET_TABLE}` does not exist yet. Skipping column updates.")
 
+                # === product_master and master_table cleaning_status migration ===
+                for tbl in ('product_master', 'master_table'):
+                    if table_exists(tbl):
+                        try:
+                            col_check = text(f"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{tbl}' AND COLUMN_NAME = 'cleaning_status'")
+                            if conn.execute(col_check).scalar() == 0:
+                                logger.info(f"⚠️ Column `cleaning_status` missing in `{tbl}`. Adding...")
+                                conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN cleaning_status VARCHAR(50) DEFAULT 'PENDING'"))
+                                logger.info(f"✅ Added `cleaning_status` column to `{tbl}`.")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to add `cleaning_status` to `{tbl}`: {e}")
+
                 # === ISSUE: raw_clean_google_map_data Upgrades === 
                 CLEAN_TABLE = "raw_clean_google_map_data"
                 if table_exists(CLEAN_TABLE):

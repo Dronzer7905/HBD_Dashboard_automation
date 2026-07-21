@@ -1,4 +1,5 @@
 from services.csv_uploaders_listing.upload_schoolgis import upload_schoolgis_data
+from services.sync_to_listing_master import sync_listing_source_to_master
 from celery_app import celery
 import os
 
@@ -7,6 +8,11 @@ def process_schoolgis_task(self,file_paths):
     if not file_paths:
         raise ValueError("No file provided")
     result = upload_schoolgis_data(file_paths)
+
+    try:
+        sync_listing_source_to_master('schoolgis')
+    except Exception as sync_err:
+        print(f"[AUTO-SYNC ERROR] Failed syncing schoolgis to master_table: {sync_err}")
 
     for path in file_paths:
         try:

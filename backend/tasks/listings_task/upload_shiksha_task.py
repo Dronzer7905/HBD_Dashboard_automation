@@ -1,12 +1,18 @@
-from celery_app import celery
 from services.csv_uploaders_listing.upload_shiksha import upload_shiksha_data
+from services.sync_to_listing_master import sync_listing_source_to_master
+from celery_app import celery
 import os
 
-@celery.task(bind=True,autoretry_for=(ValueError,RuntimeError),retry_kwargs={'max_retries':3,'countdown':5},retry_backoff=True,retry_jitter=True,acks_late=True,name='tasks.listings_task.upload_shiksha_task.process_shiksha_task')
+@celery.task(bind=True,autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3,'countdown': 5},retry_jitter=True,acks_late=True)
 def process_shiksha_task(self,file_paths):
     if not file_paths:
         raise ValueError("No file provided")
     result = upload_shiksha_data(file_paths)
+
+    try:
+        sync_listing_source_to_master('shiksha')
+    except Exception as sync_err:
+        print(f"[AUTO-SYNC ERROR] Failed syncing shiksha to master_table: {sync_err}")
 
     for path in file_paths:
         try:

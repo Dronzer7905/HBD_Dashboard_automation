@@ -47,8 +47,12 @@ def load_engine():
         url,
         pool_pre_ping=True,
         pool_recycle=120,
-        isolation_level="AUTOCOMMIT",
-        connect_args={"read_timeout": 600, "write_timeout": 600},
+        connect_args={
+            "connect_timeout": 60,
+            "read_timeout": 600,
+            "write_timeout": 600,
+            "ssl": {"ssl_disabled": True}
+        },
     )
     return engine, database
 
@@ -159,11 +163,23 @@ def backup_name_for(table_name, timestamp):
 
 
 def load_table_metadata(engine, database, table_name):
-    with engine.connect() as conn:
-        all_columns = get_columns(conn, database, table_name)
-        primary_key_columns = get_primary_key_columns(conn, database, table_name)
-        integer_pk = get_integer_primary_key(conn, database, table_name)
-        row_count = count_rows(conn, table_name)
+    conn = None
+    for attempt in range(1, 4):
+        try:
+            conn = engine.connect()
+            all_columns = get_columns(conn, database, table_name)
+            primary_key_columns = get_primary_key_columns(conn, database, table_name)
+            integer_pk = get_integer_primary_key(conn, database, table_name)
+            row_count = count_rows(conn, table_name)
+            break
+        except Exception as conn_err:
+            if attempt == 3:
+                raise conn_err
+            import time
+            time.sleep(1)
+        finally:
+            if conn:
+                conn.close()
 
     excluded = TABLE_COLUMN_EXCLUDES.get(table_name, set())
     cleanable_columns = [
@@ -244,79 +260,86 @@ def clean_table(engine, database, table_name, timestamp, chunk_size, dry_run, fo
         "dry_run": dry_run,
     }
 
-    try:
-        with engine.begin() as conn:
-            if dry_run:
-                if metadata["integer_pk"]:
-                    result["changed_rows_reported"] = estimate_dirty_rows_chunked(
-                        conn, table_name, columns, metadata["integer_pk"], chunk_size
-                    )
-                elif metadata["row_count"] > 100000 and not force_large_no_pk:
-                    result["status"] = "skipped"
-                    result["error"] = "large table without integer primary key; use --force-large-no-pk for selected tables"
-                else:
-                    result["changed_rows_reported"] = estimate_dirty_rows(conn, table_name, columns)
-                result["row_count_after"] = result["row_count_before"]
-                result["row_count_unchanged"] = True
-                return result
-
-            conn.execute(text(f"DROP TABLE IF EXISTS {backup}"))
-            conn.execute(text(f"CREATE TABLE {backup} LIKE {table}"))
-
-            pk = metadata["integer_pk"]
-            if pk:
-                pk_q = quote_ident(pk)
-                bounds = conn.execute(text(f"SELECT MIN({pk_q}), MAX({pk_q}) FROM {table}")).fetchone()
-                if bounds and bounds[0] is not None and bounds[1] is not None:
-                    start = int(bounds[0])
-                    max_id = int(bounds[1])
-                    while start <= max_id:
-                        end = start + chunk_size - 1
-                        range_filter = f"{pk_q} BETWEEN :start_id AND :end_id"
-                        params = {"start_id": start, "end_id": end}
-                        conn.execute(
-                            text(f"""
-                                INSERT IGNORE INTO {backup} ({backup_columns})
-                                SELECT {backup_columns} FROM {table}
-                                WHERE {range_filter}
-                                  AND ({condition})
-                            """),
-                            params,
+    for attempt in range(1, 4):
+        try:
+            with engine.begin() as conn:
+                if dry_run:
+                    if metadata["integer_pk"] and metadata["row_count"] > 100000:
+                        result["changed_rows_reported"] = estimate_dirty_rows_chunked(
+                            conn, table_name, columns, metadata["integer_pk"], chunk_size
                         )
-                        update_result = conn.execute(
-                            text(f"""
-                                UPDATE {table}
-                                SET {assignments}
-                                WHERE {range_filter}
-                                  AND ({condition})
-                            """),
-                            params,
-                        )
-                        result["changed_rows_reported"] += int(update_result.rowcount or 0)
-                        start = end + 1
-            else:
-                if metadata["row_count"] > 100000 and not force_large_no_pk:
-                    result["status"] = "skipped"
-                    result["error"] = "large table without integer primary key; use --force-large-no-pk for selected tables"
-                else:
-                    conn.execute(
-                        text(f"INSERT IGNORE INTO {backup} ({backup_columns}) SELECT {backup_columns} FROM {table} WHERE {condition}")
-                    )
-                    update_result = conn.execute(text(f"UPDATE {table} SET {assignments} WHERE {condition}"))
-                    result["changed_rows_reported"] = int(update_result.rowcount or 0)
+                    elif metadata["row_count"] > 100000 and not force_large_no_pk:
+                        result["status"] = "skipped"
+                        result["error"] = "large table without integer primary key; use --force-large-no-pk for selected tables"
+                    else:
+                        result["changed_rows_reported"] = estimate_dirty_rows(conn, table_name, columns)
+                    result["row_count_after"] = result["row_count_before"]
+                    result["row_count_unchanged"] = True
+                    return result
 
-            result["row_count_after"] = count_rows(conn, table_name)
-            result["row_count_unchanged"] = result["row_count_before"] == result["row_count_after"]
-
-            if result["changed_rows_reported"] == 0:
                 conn.execute(text(f"DROP TABLE IF EXISTS {backup}"))
-                result["backup_table"] = None
-    except Exception as exc:
-        engine.dispose()
-        result["status"] = "failed"
-        result["error"] = str(exc)
+                conn.execute(text(f"CREATE TABLE {backup} LIKE {table}"))
 
-    return result
+                pk = metadata["integer_pk"]
+                if pk:
+                    pk_q = quote_ident(pk)
+                    bounds = conn.execute(text(f"SELECT MIN({pk_q}), MAX({pk_q}) FROM {table}")).fetchone()
+                    if bounds and bounds[0] is not None and bounds[1] is not None:
+                        start = int(bounds[0])
+                        max_id = int(bounds[1])
+                        while start <= max_id:
+                            end = start + chunk_size - 1
+                            conn.execute(
+                                text(f"""
+                                    INSERT INTO {backup} ({backup_columns})
+                                    SELECT {backup_columns}
+                                    FROM {table}
+                                    WHERE {pk_q} BETWEEN :start_id AND :end_id
+                                      AND ({condition})
+                                """),
+                                {"start_id": start, "end_id": end},
+                            )
+                            start = end + 1
+                else:
+                    conn.execute(text(f"INSERT INTO {backup} ({backup_columns}) SELECT {backup_columns} FROM {table} WHERE {condition}"))
+
+                changed_in_backup = count_rows(conn, backup_table)
+                result["changed_rows_reported"] = changed_in_backup
+
+                if changed_in_backup > 0:
+                    if pk:
+                        pk_q = quote_ident(pk)
+                        bounds = conn.execute(text(f"SELECT MIN({pk_q}), MAX({pk_q}) FROM {table}")).fetchone()
+                        if bounds and bounds[0] is not None and bounds[1] is not None:
+                            start = int(bounds[0])
+                            max_id = int(bounds[1])
+                            while start <= max_id:
+                                end = start + chunk_size - 1
+                                conn.execute(
+                                    text(f"""
+                                        UPDATE {table}
+                                        SET {assignments}
+                                        WHERE {pk_q} BETWEEN :start_id AND :end_id
+                                          AND ({condition})
+                                    """),
+                                    {"start_id": start, "end_id": end},
+                                )
+                                start = end + 1
+                    else:
+                        conn.execute(text(f"UPDATE {table} SET {assignments} WHERE {condition}"))
+
+                result["row_count_after"] = count_rows(conn, table_name)
+                result["row_count_unchanged"] = (result["row_count_before"] == result["row_count_after"])
+                return result
+        except Exception as exc:
+            if "Lost connection" in str(exc) or "2013" in str(exc):
+                if attempt < 3:
+                    import time
+                    time.sleep(1)
+                    continue
+            result["status"] = "failed"
+            result["error"] = str(exc)
+            return result
 
 
 def run_cleaning(table_names=None, chunk_size=10000, dry_run=True, force_large_no_pk=False):
@@ -324,8 +347,17 @@ def run_cleaning(table_names=None, chunk_size=10000, dry_run=True, force_large_n
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     requested = set(table_names or [])
 
-    with engine.connect() as conn:
-        tables = get_tables(conn, database)
+    conn = None
+    for attempt in range(1, 4):
+        try:
+            conn = engine.connect()
+            tables = get_tables(conn, database)
+            break
+        except Exception as conn_err:
+            if attempt == 3:
+                raise conn_err
+            import time
+            time.sleep(1)
 
     report = {
         "database": database,

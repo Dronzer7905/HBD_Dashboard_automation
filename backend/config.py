@@ -27,8 +27,8 @@ class Config:
         "pool_pre_ping": True, # Checks if DB is alive before the query
         "connect_args": {
             "connect_timeout": 60,
-            "read_timeout": 60,
-            "write_timeout": 60,
+            "read_timeout": 300,
+            "write_timeout": 300,
             "ssl": {"ssl_disabled": True}
         }
     }

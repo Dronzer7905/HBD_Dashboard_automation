@@ -152,8 +152,18 @@ def reconcile_review_records_present_in_active_tables():
           AND u.row_id IS NOT NULL
     """))
 
-def get_table_counts_and_metrics():
-    """Fast database analyzer queries for both master_table and product_master"""
+_cached_metrics = None
+_last_metrics_time = 0
+_metrics_lock = threading.Lock()
+
+def get_table_counts_and_metrics(force_refresh=False):
+    """Fast database analyzer queries for both master_table and product_master with 5-minute memory cache"""
+    global _cached_metrics, _last_metrics_time
+    import time
+    now = time.time()
+    if not force_refresh and _cached_metrics is not None and (now - _last_metrics_time < 300):
+        return _cached_metrics
+
     metrics = {
         "master_table": {
             "total_rows": 0,
@@ -265,6 +275,8 @@ def get_table_counts_and_metrics():
         """)
         metrics["product_master"]["incomplete_records"] = db.session.execute(incomplete_p_q).fetchone()[0]
         
+        _cached_metrics = metrics
+        _last_metrics_time = time.time()
     except Exception as e:
         logger.error(f"Error executing analysis queries: {e}")
         
@@ -298,17 +310,29 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                 db.session.execute(text("SET FOREIGN_KEY_CHECKS=0"))
                 if table_name in ('master_table', 'all'):
                     db.session.execute(text(f"CREATE TABLE {backup_table_master} LIKE master_table"))
-                    db.session.execute(text(f"INSERT INTO {backup_table_master} SELECT * FROM master_table"))
+                    max_m_id = db.session.execute(text("SELECT MAX(id) FROM master_table")).scalar() or 0
+                    b_chunk = 100000
+                    for s_id in range(0, max_m_id + 1, b_chunk):
+                        db.session.execute(
+                            text(f"INSERT INTO {backup_table_master} SELECT * FROM master_table WHERE id >= :s AND id < :e"),
+                            {"s": s_id, "e": s_id + b_chunk}
+                        )
                     log_entry.backup_table_name = backup_table_master
-                    logger.info(f"Backup created: {backup_table_master}")
+                    logger.info(f"Backup created in chunks: {backup_table_master}")
                 if table_name in ('product_master', 'all'):
                     db.session.execute(text(f"CREATE TABLE {backup_table_product} LIKE product_master"))
-                    db.session.execute(text(f"INSERT INTO {backup_table_product} SELECT * FROM product_master"))
+                    max_p_id = db.session.execute(text("SELECT MAX(id) FROM product_master")).scalar() or 0
+                    b_chunk = 100000
+                    for s_id in range(0, max_p_id + 1, b_chunk):
+                        db.session.execute(
+                            text(f"INSERT INTO {backup_table_product} SELECT * FROM product_master WHERE id >= :s AND id < :e"),
+                            {"s": s_id, "e": s_id + b_chunk}
+                        )
                     if log_entry.backup_table_name:
                         log_entry.backup_table_name += f", {backup_table_product}"
                     else:
                         log_entry.backup_table_name = backup_table_product
-                    logger.info(f"Backup created: {backup_table_product}")
+                    logger.info(f"Backup created in chunks: {backup_table_product}")
                 db.session.commit()
             
             # Initial metrics before starting
@@ -463,7 +487,25 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 unmatched_val = state_clean
                                 unmatched_type = 'state'
                                 
-                        # City matching
+                        # Safe Address & Area-based City Extraction when city is missing
+                        if not city_clean and not is_loc_unmatched:
+                            if address_clean:
+                                addr_words = re.findall(r'[A-Za-z]+', address_clean)
+                                for w in addr_words:
+                                    w_lower = w.lower()
+                                    if len(w_lower) >= 4 and w_lower in cities_set:
+                                        city_clean = city_map.get(w_lower)
+                                        cleaned_count += 1
+                                        break
+                            if not city_clean and area_clean:
+                                area_lower = area_clean.lower()
+                                for c_lower, a_set in areas_by_city.items():
+                                    if area_lower in a_set:
+                                        city_clean = city_map.get(c_lower)
+                                        cleaned_count += 1
+                                        break
+
+                        # City matching & verification
                         if city_clean and not is_loc_unmatched:
                             city_lower = city_clean.lower()
                             if city_lower in COMMON_SPELLING_MAP:
@@ -477,6 +519,10 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 is_loc_unmatched = True
                                 unmatched_val = city_clean
                                 unmatched_type = 'city'
+                        elif not city_clean and not is_loc_unmatched:
+                            is_loc_unmatched = True
+                            unmatched_val = 'MISSING_CITY'
+                            unmatched_type = 'city'
 
                         # Area matching within the city context
                         if area_clean and city_clean and not is_loc_unmatched:
@@ -838,15 +884,35 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                 try:
                     db.session.execute(text("SET FOREIGN_KEY_CHECKS=0"))
                     if table_name in ('master_table', 'all') and backup_table_master:
-                        db.session.execute(text("DROP TABLE IF EXISTS master_table"))
-                        db.session.execute(text(f"CREATE TABLE master_table LIKE {backup_table_master}"))
-                        db.session.execute(text(f"INSERT INTO master_table SELECT * FROM {backup_table_master}"))
-                        logger.info("Automatic rollback master_table: SUCCESS")
+                        backup_count = 0
+                        try:
+                            backup_count = db.session.execute(text(f"SELECT COUNT(*) FROM {backup_table_master}")).scalar() or 0
+                        except Exception:
+                            pass
+                        
+                        if backup_count > 0:
+                            db.session.execute(text("DROP TABLE IF EXISTS master_table"))
+                            db.session.execute(text(f"CREATE TABLE master_table LIKE {backup_table_master}"))
+                            db.session.execute(text(f"INSERT INTO master_table SELECT * FROM {backup_table_master}"))
+                            logger.info("Automatic rollback master_table: SUCCESS")
+                        else:
+                            logger.warning(f"Skipping auto-rollback for master_table: backup table {backup_table_master} has 0 rows or does not exist.")
+                            
                     if table_name in ('product_master', 'all') and backup_table_product:
-                        db.session.execute(text("DROP TABLE IF EXISTS product_master"))
-                        db.session.execute(text(f"CREATE TABLE product_master LIKE {backup_table_product}"))
-                        db.session.execute(text(f"INSERT INTO product_master SELECT * FROM {backup_table_product}"))
-                        logger.info("Automatic rollback product_master: SUCCESS")
+                        backup_count = 0
+                        try:
+                            backup_count = db.session.execute(text(f"SELECT COUNT(*) FROM {backup_table_product}")).scalar() or 0
+                        except Exception:
+                            pass
+                        
+                        if backup_count > 0:
+                            db.session.execute(text("DROP TABLE IF EXISTS product_master"))
+                            db.session.execute(text(f"CREATE TABLE product_master LIKE {backup_table_product}"))
+                            db.session.execute(text(f"INSERT INTO product_master SELECT * FROM {backup_table_product}"))
+                            logger.info("Automatic rollback product_master: SUCCESS")
+                        else:
+                            logger.warning(f"Skipping auto-rollback for product_master: backup table {backup_table_product} has 0 rows or does not exist.")
+                            
                     reconcile_review_records_present_in_active_tables()
                     db.session.commit()
                 except Exception as rollback_err:

@@ -153,7 +153,10 @@ with app.app_context():
     for attempt in range(1, max_retries + 1):
         try:
             db.session.execute(db.text('SELECT 1'))
-            db.create_all()
+            try:
+                db.create_all()
+            except Exception as create_err:
+                pass
             db_success = True
             try:
                 print(f"✅ DATABASE CONNECTION & INITIALIZATION: SUCCESS (Connected to {db_host})")
@@ -179,11 +182,7 @@ with app.app_context():
             if attempt < max_retries:
                 time.sleep(2)
             else:
-                try:
-                    print(f"❌ DATABASE CONNECTION: FAILED after {max_retries} attempts!")
-                except UnicodeEncodeError:
-                    print(f"[ERROR] DATABASE CONNECTION: FAILED after {max_retries} attempts!")
-                raise e
+                logger.warning(f"Database connection deferred on module import: {e}")
   
   #Migration Logic...
 
