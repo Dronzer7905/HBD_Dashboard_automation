@@ -182,7 +182,7 @@ with app.app_context():
             if attempt < max_retries:
                 time.sleep(2)
             else:
-                logger.warning(f"Database connection deferred on module import: {e}")
+                app.logger.warning(f"Database connection deferred on module import: {e}")
   
   #Migration Logic...
 
