@@ -12,6 +12,7 @@ def sync_listing_source_to_master(source_name: str):
     logger.info(f"🔄 Starting listing master sync for {source_name}...")
     
     # 1. AskLaila (columns: id, name, number1, number2, category, subcategory, email, url, ratings, address, pincode, area, city, state, country)
+    # 1. AskLaila (columns: id, name, number1, number2, category, subcategory, email, url, ratings, address, pincode, area, city, state, country)
     if source_name == 'asklaila':
         sql = """
             INSERT INTO master_table (
@@ -20,7 +21,7 @@ def sync_listing_source_to_master(source_name: str):
                 website_url, ratings, source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (100000000 + id) AS global_business_id,
                 name AS business_name,
                 number1 AS primary_phone,
                 number2 AS secondary_phone,
@@ -52,7 +53,7 @@ def sync_listing_source_to_master(source_name: str):
                 area, city, state, pincode, business_category, website_url, ratings, latitude, longitude, source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (200000000 + id) AS global_business_id,
                 company AS business_name,
                 number1 AS primary_phone,
                 number2 AS secondary_phone,
@@ -94,7 +95,7 @@ def sync_listing_source_to_master(source_name: str):
                     business_category, website_url, source, cleaning_status, created_at
                 )
                 SELECT 
-                    UUID() AS global_business_id,
+                    (300000000 + id) AS global_business_id,
                     name AS business_name,
                     number AS primary_phone,
                     address,
@@ -122,7 +123,7 @@ def sync_listing_source_to_master(source_name: str):
                 business_category, website_url, source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (400000000 + id) AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 address,
@@ -148,7 +149,7 @@ def sync_listing_source_to_master(source_name: str):
                 business_category, business_subcategory, source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (500000000 + id) AS global_business_id,
                 name AS business_name,
                 pincode,
                 latitude,
@@ -177,7 +178,7 @@ def sync_listing_source_to_master(source_name: str):
                 source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (600000000 + id) AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 email,
@@ -212,7 +213,7 @@ def sync_listing_source_to_master(source_name: str):
                 source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (700000000 + id) AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 email,
@@ -247,7 +248,7 @@ def sync_listing_source_to_master(source_name: str):
                 source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (800000000 + id) AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 address,
@@ -275,7 +276,7 @@ def sync_listing_source_to_master(source_name: str):
                 business_category, source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (900000000 + id) AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 email,
@@ -304,7 +305,7 @@ def sync_listing_source_to_master(source_name: str):
                 website_url, source, cleaning_status, created_at
             )
             SELECT 
-                UUID() AS global_business_id,
+                (1000000000 + id) AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 address,
