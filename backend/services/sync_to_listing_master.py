@@ -15,11 +15,12 @@ def sync_listing_source_to_master(source_name: str):
     if source_name == 'asklaila':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, secondary_phone, email, address, 
+                global_business_id, business_name, primary_phone, secondary_phone, email, address, 
                 area, city, state, pincode, business_category, business_subcategory, 
                 website_url, ratings, source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number1 AS primary_phone,
                 number2 AS secondary_phone,
@@ -27,7 +28,7 @@ def sync_listing_source_to_master(source_name: str):
                 address,
                 area,
                 city,
-                state,
+                IFNULL(state, 'Unknown') AS state,
                 pincode,
                 category AS business_category,
                 subcategory AS business_subcategory,
@@ -47,10 +48,11 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'justdial':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, secondary_phone, other_phones, virtual_phone, whatsapp_phone, email, address, 
-                area, city, pincode, business_category, website_url, ratings, latitude, longitude, source, cleaning_status, created_at
+                global_business_id, business_name, primary_phone, secondary_phone, other_phones, virtual_phone, whatsapp_phone, email, address, 
+                area, city, state, pincode, business_category, website_url, ratings, latitude, longitude, source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 company AS business_name,
                 number1 AS primary_phone,
                 number2 AS secondary_phone,
@@ -61,6 +63,7 @@ def sync_listing_source_to_master(source_name: str):
                 address,
                 area,
                 city,
+                'Unknown' AS state,
                 pin AS pincode,
                 category AS business_category,
                 website AS website_url,
@@ -87,14 +90,16 @@ def sync_listing_source_to_master(source_name: str):
             end_id = start_id + batch_size
             sql = f"""
                 INSERT INTO master_table (
-                    business_name, primary_phone, address, city, country,
+                    global_business_id, business_name, primary_phone, address, city, state, country,
                     business_category, website_url, source, cleaning_status, created_at
                 )
                 SELECT 
+                    UUID() AS global_business_id,
                     name AS business_name,
                     number AS primary_phone,
                     address,
                     city,
+                    'Unknown' AS state,
                     country,
                     category AS business_category,
                     url AS website_url,
@@ -113,14 +118,16 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'heyplaces':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, address, city, 
+                global_business_id, business_name, primary_phone, address, city, state, 
                 business_category, website_url, source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 address,
                 city,
+                'Unknown' AS state,
                 category AS business_category,
                 website AS website_url,
                 'heyplaces' AS source,
@@ -137,16 +144,17 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'schoolgis':
         sql = """
             INSERT INTO master_table (
-                business_name, pincode, latitude, longitude, city, state, country,
+                global_business_id, business_name, pincode, latitude, longitude, city, state, country,
                 business_category, business_subcategory, source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 pincode,
                 latitude,
                 longitude,
                 city,
-                state,
+                IFNULL(state, 'Unknown') AS state,
                 country,
                 category AS business_category,
                 subcategory AS business_subcategory,
@@ -164,16 +172,18 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'college_dunia':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, email, address, area, country,
+                global_business_id, business_name, primary_phone, email, address, area, state, country,
                 business_category, business_subcategory, website_url, ratings, avg_fees, course_details, duration, requirement,
                 source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 email,
                 address,
                 area,
+                'Unknown' AS state,
                 country,
                 category AS business_category,
                 subcategory AS business_subcategory,
@@ -197,16 +207,18 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'shiksha':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, email, address, area, country, latitude, longitude,
+                global_business_id, business_name, primary_phone, email, address, area, state, country, latitude, longitude,
                 business_category, website_url, ratings, avg_fees, avg_salary, courses, admission_req_list,
                 source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 email,
                 address,
                 area,
+                'Unknown' AS state,
                 country,
                 latitude,
                 longitude,
@@ -231,14 +243,16 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'nearbuy':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, address, city, country, latitude, longitude, ratings,
+                global_business_id, business_name, primary_phone, address, city, state, country, latitude, longitude, ratings,
                 source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 address,
                 city,
+                'Unknown' AS state,
                 country,
                 latitude,
                 longitude,
@@ -257,17 +271,18 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'yellow_pages':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, email, address, area, city, state, pincode, country,
+                global_business_id, business_name, primary_phone, email, address, area, city, state, pincode, country,
                 business_category, source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 email,
                 address,
                 area,
                 city,
-                state,
+                IFNULL(state, 'Unknown') AS state,
                 pincode,
                 country,
                 category AS business_category,
@@ -285,16 +300,18 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'freelisting':
         sql = """
             INSERT INTO master_table (
-                business_name, primary_phone, address, description, business_category, business_subcategory, subcategory_2,
+                global_business_id, business_name, primary_phone, address, state, description, business_category, business_subcategory, subcategory_2,
                 website_url, source, cleaning_status, created_at
             )
             SELECT 
+                UUID() AS global_business_id,
                 name AS business_name,
                 number AS primary_phone,
                 address,
+                'Unknown' AS state,
                 description,
                 category AS business_category,
-                subcategory AS business_subcategory,
+                subcategory_2 AS business_subcategory,
                 subcategory_1 AS subcategory_2,
                 url AS website_url,
                 'freelisting' AS source,
