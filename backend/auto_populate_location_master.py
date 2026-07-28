@@ -23,14 +23,11 @@ def main():
         unmatched_query = text("""
             SELECT DISTINCT m.city, m.area 
             FROM master_table m
+            LEFT JOIN Location_Master_India l 
+              ON l.city_name = m.city AND l.area_name = m.area
             WHERE m.city IS NOT NULL 
               AND m.area IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 
-                  FROM Location_Master_India l
-                  WHERE LOWER(l.city_name) = LOWER(m.city) 
-                    AND LOWER(l.area_name) = LOWER(m.area)
-              )
+              AND l.id IS NULL
         """)
         print("Fetching unmatched city/area combinations from master_table...")
         unmatched_pairs = db.session.execute(unmatched_query).fetchall()
