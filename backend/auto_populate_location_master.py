@@ -19,19 +19,39 @@ def main():
     print("=============================================================\n")
 
     with app.app_context():
-        # 1. Fetch unique (city, area) from master_table not in Location_Master_India
-        unmatched_query = text("""
-            SELECT DISTINCT m.city, m.area 
-            FROM master_table m
-            LEFT JOIN Location_Master_India l 
-              ON l.city_name = m.city AND l.area_name = m.area
-            WHERE m.city IS NOT NULL 
-              AND m.area IS NOT NULL
-              AND l.id IS NULL
+        # 1. Adjust PyMySQL read timeout dynamically to 180 seconds to prevent client-side timeouts
+        try:
+            db.session.connection().connection.read_timeout = 180
+        except Exception:
+            pass
+
+        print("Fetching existing city/area combinations from Location_Master_India...")
+        existing_query = text("""
+            SELECT DISTINCT city_name, area_name 
+            FROM Location_Master_India 
+            WHERE city_name IS NOT NULL AND area_name IS NOT NULL
         """)
-        print("Fetching unmatched city/area combinations from master_table...")
-        unmatched_pairs = db.session.execute(unmatched_query).fetchall()
-        print(f"Found {len(unmatched_pairs):,} unique unmatched combinations.\n")
+        existing_rows = db.session.execute(existing_query).fetchall()
+        existing_set = { (r[0].lower().strip(), r[1].lower().strip()) for r in existing_rows }
+        print(f"Cached {len(existing_set):,} existing location master records.\n")
+
+        print("Fetching unique city/area combinations from master_table (this may take up to 30 seconds)...")
+        master_query = text("""
+            SELECT DISTINCT city, area 
+            FROM master_table 
+            WHERE city IS NOT NULL AND area IS NOT NULL
+        """)
+        master_rows = db.session.execute(master_query).fetchall()
+        print(f"Found {len(master_rows):,} distinct combinations in master_table.\n")
+
+        # 2. Filter unmatched pairs in memory to avoid heavy DB join timeouts
+        unmatched_pairs = []
+        for r in master_rows:
+            city_val = r[0].strip()
+            area_val = r[1].strip()
+            if (city_val.lower(), area_val.lower()) not in existing_set:
+                unmatched_pairs.append((city_val, area_val))
+        print(f"Found {len(unmatched_pairs):,} unique unmatched combinations to process.\n")
 
         if not unmatched_pairs:
             print("No unmatched locations found. Location_Master_India is fully populated.")
