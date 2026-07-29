@@ -778,6 +778,30 @@ def run_pending_migrations(app):
                 except Exception as scraper_task_mig_err:
                     logger.error(f"❌ Scraper Tasks MySQL migration failed: {scraper_task_mig_err}")
 
+                # === unmatched_data_review Context Columns Migration ===
+                if table_exists('unmatched_data_review'):
+                    columns_to_add = [
+                        ("table_name", "VARCHAR(100) NULL"),
+                        ("row_id", "INT NULL"),
+                        ("row_data", "LONGTEXT NULL")
+                    ]
+                    for col_name, col_type in columns_to_add:
+                        try:
+                            col_check = text(f"""
+                                SELECT COUNT(*) FROM information_schema.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() 
+                                AND TABLE_NAME = 'unmatched_data_review' 
+                                AND COLUMN_NAME = '{col_name}'
+                            """)
+                            if conn.execute(col_check).scalar() == 0:
+                                logger.info(f"⚠️ Column `{col_name}` missing in `unmatched_data_review`. Adding column...")
+                                conn.execute(text(f"ALTER TABLE unmatched_data_review ADD COLUMN {col_name} {col_type}"))
+                                logger.info(f"✅ Column `{col_name}` successfully added to `unmatched_data_review`.")
+                        except Exception as col_err:
+                            logger.error(f"❌ Failed to add `{col_name}` to `unmatched_data_review`: {col_err}")
+                else:
+                    logger.warning("⏩ Table `unmatched_data_review` does not exist yet. Skipping column updates.")
+
             print("[Migrations] DB Migrations check complete.")
             
         except Exception as e:
