@@ -1,5 +1,5 @@
 # model/items.py
-from sqlalchemy import Column, Integer, String, Float, Text , BigInteger
+from sqlalchemy import Column, Integer, String, Float, Text , BigInteger, Boolean
 from database.session import Base  # <-- app.database.session ke jagah sirf database.session
 
 class ItemData(Base):
@@ -7,8 +7,8 @@ class ItemData(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     category = Column(String(255))
-    city = Column(String(500),primary_key=True)
-    name = Column(String(255),primary_key=True)
+    city = Column(String(500))
+    name = Column(String(255))
     area = Column(String(255))
     address = Column(String(500))
     phone_no_1 = Column(String(255))
@@ -27,8 +27,12 @@ class ItemData(Base):
     twitter_url = Column(String(500))
     description = Column(Text)
     pincode = Column(Integer)
-    virtual_phone_no = Column(String(255))
+    
+    # Duplicate detection fields
+    is_duplicate = Column(Boolean, default=False, nullable=False)
+    duplicate_group_id = Column(String(36), nullable=True)
     whatsapp_no = Column(String(255))
+    virtual_phone_no = Column(String(255))
     phone_no_3 = Column(String(255))
     avg_spent = Column(Integer)
     cost_for_two = Column(Integer)

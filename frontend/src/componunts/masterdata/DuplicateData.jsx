@@ -6,6 +6,7 @@ const DuplicateData = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState(""); // Search state
 
   const limit = 1000;
@@ -17,15 +18,28 @@ const DuplicateData = () => {
 
   const fetchData = async (page, searchTerm = "") => {
     setLoading(true);
+    setError(null);
     try {
-      const response = await api.get(
-        `/read_master_input/?page=${page}&limit=${limit}&search=${searchTerm}`
-      );
-      const result = await response.json();
+      // Fix #1: correct endpoint (was /read_master_input/)
+      // Fix #2: use Axios params object instead of manual query string
+      const response = await api.get("/items/duplicates", {
+        params: { page, limit, search: searchTerm },
+      });
+      // Fix #2: Axios auto-parses JSON — use response.data, not response.json()
+      const result = response.data;
       setData(result.data || []);
       setTotalRecords(result.total_records || 0);
-    } catch (error) {
-      console.error("Error fetching data:", error);
+    } catch (err) {
+      const status = err.response?.status;
+      const message = err.response?.data?.message || err.response?.data?.error || err.message;
+      if (status === 401) {
+        setError("Session expired \u2014 please log in again.");
+      } else if (status === 500) {
+        setError(`Server error: ${message}`);
+      } else {
+        setError(`Error (${status || "network"}): ${message}`);
+      }
+      console.error("Error fetching duplicate data:", status, message);
     } finally {
       setLoading(false);
     }
@@ -50,6 +64,8 @@ const DuplicateData = () => {
       <div className="bg-white shadow rounded-lg p-4">
         {loading ? (
           <p className="text-center text-blue-500 font-semibold">Loading data...</p>
+        ) : error ? (
+          <p className="text-center text-red-600 font-semibold py-4">{error}</p>
         ) : (
           <>
             <div className="overflow-x-auto">
