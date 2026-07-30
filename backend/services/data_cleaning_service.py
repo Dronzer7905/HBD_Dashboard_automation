@@ -292,6 +292,8 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
 
         backup_table_master = None
         backup_table_product = None
+        backup_master_completed = False
+        backup_product_completed = False
             
         try:
             logger.info(f"Starting async data cleaning run_id={run_id}, table={table_name}, type={run_type}")
@@ -321,6 +323,7 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                             {"s": s_id, "e": s_id + b_chunk}
                         )
                     log_entry.backup_table_name = backup_table_master
+                    backup_master_completed = True
                     logger.info(f"Backup created in chunks: {backup_table_master}")
                 if table_name in ('product_master', 'all'):
                     total_p_rows = db.session.execute(text("SELECT COUNT(*) FROM product_master")).scalar() or 0
@@ -338,6 +341,7 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                         log_entry.backup_table_name += f", {backup_table_product}"
                     else:
                         log_entry.backup_table_name = backup_table_product
+                    backup_product_completed = True
                     logger.info(f"Backup created in chunks: {backup_table_product}")
                 db.session.commit()
             
@@ -890,34 +894,26 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                 try:
                     db.session.execute(text("SET FOREIGN_KEY_CHECKS=0"))
                     if table_name in ('master_table', 'all') and backup_table_master:
-                        backup_count = 0
-                        try:
-                            backup_count = db.session.execute(text(f"SELECT COUNT(*) FROM {backup_table_master}")).scalar() or 0
-                        except Exception:
-                            pass
-                        
-                        if backup_count > 0:
-                            db.session.execute(text("DROP TABLE IF EXISTS master_table"))
-                            db.session.execute(text(f"CREATE TABLE master_table LIKE {backup_table_master}"))
-                            db.session.execute(text(f"INSERT INTO master_table SELECT * FROM {backup_table_master}"))
+                        if backup_master_completed:
+                            logger.info(f"Performing atomic rename rollback for master_table from {backup_table_master}...")
+                            db.session.execute(text("DROP TABLE IF EXISTS master_table_failed"))
+                            # Atomically swap tables in less than 1 millisecond
+                            db.session.execute(text(f"RENAME TABLE master_table TO master_table_failed, {backup_table_master} TO master_table"))
+                            db.session.execute(text("DROP TABLE IF EXISTS master_table_failed"))
                             logger.info("Automatic rollback master_table: SUCCESS")
                         else:
-                            logger.warning(f"Skipping auto-rollback for master_table: backup table {backup_table_master} has 0 rows or does not exist.")
+                            logger.warning(f"Skipping auto-rollback for master_table: backup did not complete successfully or was interrupted.")
                             
                     if table_name in ('product_master', 'all') and backup_table_product:
-                        backup_count = 0
-                        try:
-                            backup_count = db.session.execute(text(f"SELECT COUNT(*) FROM {backup_table_product}")).scalar() or 0
-                        except Exception:
-                            pass
-                        
-                        if backup_count > 0:
-                            db.session.execute(text("DROP TABLE IF EXISTS product_master"))
-                            db.session.execute(text(f"CREATE TABLE product_master LIKE {backup_table_product}"))
-                            db.session.execute(text(f"INSERT INTO product_master SELECT * FROM {backup_table_product}"))
+                        if backup_product_completed:
+                            logger.info(f"Performing atomic rename rollback for product_master from {backup_table_product}...")
+                            db.session.execute(text("DROP TABLE IF EXISTS product_master_failed"))
+                            # Atomically swap tables in less than 1 millisecond
+                            db.session.execute(text(f"RENAME TABLE product_master TO product_master_failed, {backup_table_product} TO product_master"))
+                            db.session.execute(text("DROP TABLE IF EXISTS product_master_failed"))
                             logger.info("Automatic rollback product_master: SUCCESS")
                         else:
-                            logger.warning(f"Skipping auto-rollback for product_master: backup table {backup_table_product} has 0 rows or does not exist.")
+                            logger.warning(f"Skipping auto-rollback for product_master: backup did not complete successfully or was interrupted.")
                             
                     reconcile_review_records_present_in_active_tables()
                     db.session.commit()
