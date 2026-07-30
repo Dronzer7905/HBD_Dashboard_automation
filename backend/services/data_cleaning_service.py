@@ -309,6 +309,9 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
             if run_type == 'apply':
                 db.session.execute(text("SET FOREIGN_KEY_CHECKS=0"))
                 if table_name in ('master_table', 'all'):
+                    total_m_rows = db.session.execute(text("SELECT COUNT(*) FROM master_table")).scalar() or 0
+                    if total_m_rows <= 10:
+                        raise ValueError(f"Aborting apply run: target table 'master_table' has only {total_m_rows} rows (safety check failed). Please restore data first.")
                     db.session.execute(text(f"CREATE TABLE {backup_table_master} LIKE master_table"))
                     max_m_id = db.session.execute(text("SELECT MAX(id) FROM master_table")).scalar() or 0
                     b_chunk = 100000
@@ -320,6 +323,9 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                     log_entry.backup_table_name = backup_table_master
                     logger.info(f"Backup created in chunks: {backup_table_master}")
                 if table_name in ('product_master', 'all'):
+                    total_p_rows = db.session.execute(text("SELECT COUNT(*) FROM product_master")).scalar() or 0
+                    if total_p_rows <= 10:
+                        raise ValueError(f"Aborting apply run: target table 'product_master' has only {total_p_rows} rows (safety check failed). Please restore data first.")
                     db.session.execute(text(f"CREATE TABLE {backup_table_product} LIKE product_master"))
                     max_p_id = db.session.execute(text("SELECT MAX(id) FROM product_master")).scalar() or 0
                     b_chunk = 100000
