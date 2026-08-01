@@ -187,6 +187,7 @@ def process_missing_rows():
                 
                 if status == "VALID":
                     master_batch.append({
+                        "global_business_id": 1200000000 + norm_row['id'],
                         "name": norm_row['name'], "address": norm_row['address'], "website": norm_row['website'],
                         "phone_number": norm_row['phone_number'], "reviews_count": safe_int(norm_row.get('reviews_count', 0)),
                         "reviews_avg": safe_float(norm_row.get('reviews_average', 0.00)), "category": norm_row['category'],
@@ -210,9 +211,9 @@ def process_missing_rows():
                     if master_batch:
                         print(f"Inserting {len(master_batch)} rows into master table...")
                         trans_conn.execute(text("""
-                            INSERT IGNORE INTO g_map_master_table 
-                            (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
-                            VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
+                            INSERT IGNORE INTO master_table 
+                            (global_business_id, business_name, address, website_url, primary_phone, reviews, ratings, business_category, business_subcategory, city, state, area, source, cleaning_status, created_at)
+                            VALUES (:global_business_id, :name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, 'Google Maps', 'PENDING', :created_at)
                         """), master_batch)
             print("Batch Done!")
 

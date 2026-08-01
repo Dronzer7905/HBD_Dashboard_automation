@@ -93,20 +93,23 @@ def get_master_table_list():
 def get_master_dashboard_stats():
     session = get_db_session()
 
-    # --- This queries g_map_master_table where the real Google Maps data lives ---
-    TABLE = "g_map_master_table"
-
     try:
         # State summary (top 5)
-        state_query = text(f"SELECT state, COUNT(*) as count FROM {TABLE} WHERE state IS NOT NULL AND state != '' GROUP BY state ORDER BY count DESC LIMIT 5")
+        state_query = text("""
+            SELECT state, COUNT(*) as count 
+            FROM master_table 
+            WHERE source = 'Google Maps' AND state IS NOT NULL AND state != '' 
+            GROUP BY state ORDER BY count DESC LIMIT 5
+        """)
         states = [dict(row._mapping) for row in session.execute(state_query)]
 
         # Phone distribution
-        phone_query = text(f"""
+        phone_query = text("""
             SELECT 
-                SUM(CASE WHEN phone_number IS NOT NULL AND phone_number != '' THEN 1 ELSE 0 END) as has_any_phone,
+                SUM(CASE WHEN primary_phone IS NOT NULL AND primary_phone != '' THEN 1 ELSE 0 END) as has_any_phone,
                 COUNT(*) as total_count
-            FROM {TABLE}
+            FROM master_table
+            WHERE source = 'Google Maps'
         """)
         phone_res = session.execute(phone_query).fetchone()
         
@@ -124,30 +127,42 @@ def get_master_dashboard_stats():
             top_cities = [dict(row._mapping) for row in session.execute(city_query)]
         except Exception as e:
             # Fallback
-            city_query = text(f"SELECT city as name, COUNT(*) as count FROM {TABLE} WHERE city IS NOT NULL AND city != '' GROUP BY city ORDER BY count DESC LIMIT 10")
+            city_query = text("""
+                SELECT city as name, COUNT(*) as count 
+                FROM master_table 
+                WHERE source = 'Google Maps' AND city IS NOT NULL AND city != '' 
+                GROUP BY city ORDER BY count DESC LIMIT 10
+            """)
             top_cities = [dict(row._mapping) for row in session.execute(city_query)]
         
         # Top 5 subcategories
-        sub_query = text(f"""
+        sub_query = text("""
             SELECT name, COUNT(*) as count FROM (
-                SELECT COALESCE(subcategory, category, 'Other') as name FROM {TABLE}
+                SELECT COALESCE(business_subcategory, business_category, 'Other') as name 
+                FROM master_table 
+                WHERE source = 'Google Maps'
             ) sub GROUP BY name ORDER BY count DESC LIMIT 5
         """)
         top_subs = [dict(row._mapping) for row in session.execute(sub_query)]
 
         # Total records
-        total_records = session.execute(text(f"SELECT COUNT(*) FROM {TABLE}")).scalar() or 0
+        total_records = session.execute(text("SELECT COUNT(*) FROM master_table WHERE source = 'Google Maps'")).scalar() or 0
         
         # Average rating
-        avg_rating = session.execute(text(f"SELECT ROUND(AVG(reviews_avg), 1) FROM {TABLE} WHERE reviews_avg IS NOT NULL AND reviews_avg > 0")).scalar() or 0.0
+        avg_rating = session.execute(text("""
+            SELECT ROUND(AVG(ratings), 1) 
+            FROM master_table 
+            WHERE source = 'Google Maps' AND ratings IS NOT NULL AND ratings > 0
+        """)).scalar() or 0.0
         
         # Top rated businesses
-        top_rated_query = text(f"""
-            SELECT id, name, city, reviews_avg as stars, category
-            FROM {TABLE}
-            WHERE reviews_avg IS NOT NULL 
-            AND name IS NOT NULL AND name != ''
-            ORDER BY reviews_avg DESC, reviews_count DESC 
+        top_rated_query = text("""
+            SELECT id, business_name as name, city, ratings as stars, business_category as category
+            FROM master_table
+            WHERE source = 'Google Maps'
+            AND ratings IS NOT NULL 
+            AND business_name IS NOT NULL AND business_name != ''
+            ORDER BY ratings DESC, reviews DESC 
             LIMIT 5
         """)
         top_rated = [dict(row._mapping) for row in session.execute(top_rated_query)]

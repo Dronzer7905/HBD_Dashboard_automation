@@ -14,7 +14,7 @@ validation_dashboard_bp = Blueprint("validation_dashboard", __name__)
 # 🗄️ Table Names
 CLEAN_TABLE = "raw_clean_google_map_data"
 RAW_TABLE = "raw_google_map_drive_data"
-MASTER_TABLE = "g_map_master_table"
+MASTER_TABLE = "master_table"
 
 
 def execute_read(query, params=None):

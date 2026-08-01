@@ -244,13 +244,20 @@ def sync_listing_source_to_master(source_name: str):
     elif source_name == 'nearbuy':
         sql = """
             INSERT INTO master_table (
-                global_business_id, business_name, primary_phone, address, city, state, country, latitude, longitude, ratings,
+                global_business_id, business_name, primary_phone, secondary_phone, address, city, state, country, latitude, longitude, ratings,
                 source, cleaning_status, created_at
             )
             SELECT 
                 (800000000 + id) AS global_business_id,
                 name AS business_name,
-                number AS primary_phone,
+                CASE 
+                    WHEN JSON_VALID(number) THEN NULLIF(JSON_UNQUOTE(JSON_EXTRACT(number, '$[0]')), '')
+                    ELSE NULLIF(number, '')
+                END AS primary_phone,
+                CASE 
+                    WHEN JSON_VALID(number) THEN NULLIF(JSON_UNQUOTE(JSON_EXTRACT(number, '$[1]')), '')
+                    ELSE NULL
+                END AS secondary_phone,
                 address,
                 city,
                 'Unknown' AS state,
@@ -324,3 +331,141 @@ def sync_listing_source_to_master(source_name: str):
         res = db.session.execute(text(sql))
         db.session.commit()
         logger.info(f"✅ Successfully synced FreeListing to master_table. Rows inserted: {res.rowcount}")
+
+    # 11. ItemData (Staging CSV upload)
+    elif source_name == 'item_data':
+        max_id = db.session.execute(text("SELECT MAX(id) FROM item_data")).scalar() or 0
+        batch_size = 50000
+        logger.info(f"📦 item_data has max_id={max_id}. Syncing in chunks of {batch_size}...")
+        total_synced = 0
+        for start_id in range(0, max_id + 1, batch_size):
+            end_id = start_id + batch_size
+            sql = f"""
+                INSERT INTO master_table (
+                    global_business_id, business_name, primary_phone, secondary_phone, other_phones,
+                    virtual_phone, whatsapp_phone, email, address, area, city, state, pincode, country,
+                    business_category, business_subcategory, ratings, reviews, latitude, longitude,
+                    facebook_url, linkedin_url, twitter_url, description, avg_spent, cost_for_two,
+                    source, cleaning_status, created_at
+                )
+                SELECT 
+                    (1100000000 + id) AS global_business_id,
+                    name AS business_name,
+                    phone_no_1 AS primary_phone,
+                    phone_no_2 AS secondary_phone,
+                    phone_no_3 AS other_phones,
+                    virtual_phone_no AS virtual_phone,
+                    whatsapp_no AS whatsapp_phone,
+                    email,
+                    address,
+                    area,
+                    city,
+                    IFNULL(state, 'Unknown') AS state,
+                    pincode,
+                    IFNULL(country, 'India') AS country,
+                    category AS business_category,
+                    sub_category AS business_subcategory,
+                    ratings,
+                    reviews,
+                    latitude,
+                    longitude,
+                    facebook_url,
+                    linkedin_url,
+                    twitter_url,
+                    description,
+                    avg_spent,
+                    cost_for_two,
+                    IFNULL(source, 'item_data') AS source,
+                    'PENDING' AS cleaning_status,
+                    NOW()
+                FROM item_data
+                WHERE id >= {start_id} AND id < {end_id} AND name IS NOT NULL AND TRIM(name) != '' AND (phone_no_1 IS NOT NULL OR address IS NOT NULL OR city IS NOT NULL);
+            """
+            r = db.session.execute(text(sql))
+            db.session.commit()
+            total_synced += r.rowcount
+            logger.info(f"Inserted {total_synced:,} of {max_id:,} rows...")
+
+    # 12. Magicpin
+    elif source_name == 'magicpin':
+        sql = """
+            INSERT INTO master_table (
+                global_business_id, business_name, primary_phone, ratings, avg_spent, address,
+                area, business_subcategory, city, state, business_category, cost_for_two,
+                latitude, longitude, source, cleaning_status, created_at
+            )
+            SELECT 
+                (1300000000 + id) AS global_business_id,
+                name AS business_name,
+                number AS primary_phone,
+                rating AS ratings,
+                avg_spent,
+                address,
+                area,
+                subcategory AS business_subcategory,
+                city,
+                'Unknown' AS state,
+                category AS business_category,
+                cost_for_two,
+                latitude,
+                longitude,
+                'magicpin' AS source,
+                'PENDING' AS cleaning_status,
+                NOW()
+            FROM magicpin
+            WHERE name IS NOT NULL;
+        """
+        res = db.session.execute(text(sql))
+        db.session.commit()
+        logger.info(f"✅ Successfully synced Magicpin to master_table. Rows inserted: {res.rowcount}")
+
+    # 13. ATM
+    elif source_name == 'atm':
+        sql = """
+            INSERT INTO master_table (
+                global_business_id, business_name, address, city, state, country,
+                business_category, source, cleaning_status, created_at
+            )
+            SELECT 
+                (1400000000 + id) AS global_business_id,
+                bank AS business_name,
+                address,
+                city,
+                state,
+                country,
+                category AS business_category,
+                'atm' AS source,
+                'PENDING' AS cleaning_status,
+                NOW()
+            FROM atm
+            WHERE bank IS NOT NULL;
+        """
+        res = db.session.execute(text(sql))
+        db.session.commit()
+        logger.info(f"✅ Successfully synced ATM to master_table. Rows inserted: {res.rowcount}")
+
+    # 14. Post Office
+    elif source_name == 'post_office':
+        sql = """
+            INSERT INTO master_table (
+                global_business_id, business_name, pincode, area, city, state,
+                business_category, source, cleaning_status, created_at
+            )
+            SELECT 
+                (1500000000 + id) AS global_business_id,
+                CONCAT(area, ' Post Office') AS business_name,
+                pincode,
+                area,
+                city,
+                state,
+                'Post Office' AS business_category,
+                'post_office' AS source,
+                'PENDING' AS cleaning_status,
+                NOW()
+            FROM post_office
+            WHERE area IS NOT NULL;
+        """
+        res = db.session.execute(text(sql))
+        db.session.commit()
+        logger.info(f"✅ Successfully synced Post Office to master_table. Rows inserted: {res.rowcount}")
+

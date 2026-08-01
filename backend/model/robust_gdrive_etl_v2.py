@@ -656,6 +656,7 @@ class ValidationQualityProcessor:
                     
                     if status == "VALID":
                         master_batch.append({
+                            "global_business_id": 1200000000 + norm_row['id'],
                             "name": norm_row['name'], "address": norm_row['address'], "website": norm_row['website'],
                             "phone_number": norm_row['phone_number'], "reviews_count": self.safe_int(norm_row.get('reviews_count', 0)),
                             "reviews_avg": self.safe_float(norm_row.get('reviews_average', 0.00)), "category": norm_row['category'],
@@ -676,9 +677,9 @@ class ValidationQualityProcessor:
                         
                         if master_batch:
                             trans_conn.execute(text("""
-                                INSERT IGNORE INTO g_map_master_table 
-                                (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
-                                VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
+                                INSERT IGNORE INTO master_table 
+                                (global_business_id, business_name, address, website_url, primary_phone, reviews, ratings, business_category, business_subcategory, city, state, area, source, cleaning_status, created_at)
+                                VALUES (:global_business_id, :name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, 'Google Maps', 'PENDING', :created_at)
                             """), master_batch)
                 logger.info(f"✅ Automatically synced {len(clean_batch)} missing rows.")
 
@@ -688,10 +689,11 @@ class ValidationQualityProcessor:
                     SELECT c.id, c.name, c.address, c.website, c.phone_number, 
                            c.reviews_count, c.reviews_avg as reviews_avg, c.category, c.subcategory, 
                            c.city, c.state, c.area, c.created_at
-                    FROM raw_clean_google_map_data c
-                    LEFT JOIN g_map_master_table m ON 
-                        LEFT(c.name, 100) = LEFT(m.name, 100) AND 
-                        c.phone_number = m.phone_number AND 
+                     FROM raw_clean_google_map_data c
+                     LEFT JOIN master_table m ON 
+                        m.source = 'Google Maps' AND
+                        LEFT(c.name, 100) = LEFT(m.business_name, 100) AND 
+                        c.phone_number = m.primary_phone AND 
                         LEFT(c.city, 50) = LEFT(m.city, 50) AND 
                         LEFT(c.address, 100) = LEFT(m.address, 100)
                     WHERE c.validation_status = 'VALID'
@@ -705,6 +707,7 @@ class ValidationQualityProcessor:
                     for row in master_rows:
                         r = row._mapping if hasattr(row, '_mapping') else dict(zip(row.keys(), row))
                         mbatch.append({
+                            "global_business_id": 1200000000 + r['id'],
                             "name": r['name'], "address": r['address'], "website": r['website'],
                             "phone_number": r['phone_number'], "reviews_count": self.safe_int(r['reviews_count']),
                             "reviews_avg": self.safe_float(r['reviews_avg']), "category": r['category'],
@@ -714,9 +717,9 @@ class ValidationQualityProcessor:
                     
                     with self.engine.begin() as trans_conn:
                         trans_conn.execute(text("""
-                            INSERT IGNORE INTO g_map_master_table 
-                            (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
-                            VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
+                            INSERT IGNORE INTO master_table 
+                            (global_business_id, business_name, address, website_url, primary_phone, reviews, ratings, business_category, business_subcategory, city, state, area, source, cleaning_status, created_at)
+                            VALUES (:global_business_id, :name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, 'Google Maps', 'PENDING', :created_at)
                         """), mbatch)
                     logger.info(f"✅ Automatically synced {len(mbatch)} rows to Master Table.")
 
@@ -844,6 +847,7 @@ class ValidationQualityProcessor:
                                 
                                 if status == "VALID":
                                     master_data_batch.append({
+                                        "global_business_id": 1200000000 + row['id'],
                                         "name": row['name'],
                                         "address": row['address'],
                                         "website": row['website'],
@@ -877,9 +881,9 @@ class ValidationQualityProcessor:
                         
                     if master_data_batch:
                         conn.execute(text("""
-                            INSERT IGNORE INTO g_map_master_table 
-                            (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
-                            VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
+                            INSERT IGNORE INTO master_table 
+                            (global_business_id, business_name, address, website_url, primary_phone, reviews, ratings, business_category, business_subcategory, city, state, area, source, cleaning_status, created_at)
+                            VALUES (:global_business_id, :name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, 'Google Maps', 'PENDING', :created_at)
                         """), master_data_batch)
 
                 # 5. Finalize batch — ALWAYS advance the cursor
