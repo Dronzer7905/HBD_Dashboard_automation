@@ -4,7 +4,7 @@ from datetime import timedelta
 import urllib.parse  # Added for password encoding
 
 _env_path = os.path.join(os.path.dirname(__file__), '.env')
-load_dotenv(_env_path, override=True)
+load_dotenv(_env_path, override=False)
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")  
 
