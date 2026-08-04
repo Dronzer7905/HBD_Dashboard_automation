@@ -26,4 +26,20 @@ api.interceptors.request.use(
   }
 );
 
+// Fix #5: Global 401 response interceptor — clears stale JWT and redirects
+// to login so expired-token failures never silently break pages again.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+      // Avoid redirect loops if already on the sign-in page
+      if (!window.location.pathname.includes("/auth/sign-in")) {
+        window.location.href = "/auth/sign-in";
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;

@@ -298,10 +298,11 @@ def get_list():
 
         return jsonify({
             "status": "success",
-            "data": data_list,
-            "total": total,
             "page": page,
-            "limit": limit
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit,
+            "data": data_list
         })
     except Exception as e:
         logger.error(f"Error fetching unmatched list: {e}")
