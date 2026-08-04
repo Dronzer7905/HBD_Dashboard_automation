@@ -88,7 +88,9 @@ def clean_and_route_batch(source_table, records):
         city = (r.get("city") or "").strip()
         state = (r.get("state") or "").strip()
         pincode = (r.get("pincode") or "").strip()
-
+        phone_no_2 = (r.get("phone_no_2") or "").strip()
+        phone_no_3 = (r.get("phone_no_3") or "").strip()
+        whatsapp_no = (r.get("whatsapp_no") or "").strip()
         inferred_fields = []
 
         # Fix city spelling
@@ -112,8 +114,8 @@ def clean_and_route_batch(source_table, records):
 
         # Validate
         is_phone_valid = validate_phone(phone)
-        has_location = bool(city and state and address)
-        has_contact = is_phone_valid or bool(email)
+        has_location = bool(city)  # city alone is sufficient
+        has_contact = is_phone_valid or bool(email) or bool(phone_no_2) or bool(phone_no_3) or bool(whatsapp_no)
         has_name = bool(name)
 
         # Deduplication check

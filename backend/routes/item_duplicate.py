@@ -149,7 +149,9 @@
 
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text
+from sqlalchemy.exc import OperationalError
+import logging
 from database.session import SessionLocal
 from model.item_csv_model import ItemData
 
@@ -189,80 +191,27 @@ def serialize(item):
 
 
 # ---------------- DUPLICATES FETCH ----------------
-@item_duplicate_bp.route("/items/duplicates", methods=["GET"])
+# TODO (long-term fix): Precompute duplicates via a Celery task into a
+# dedicated `duplicate_items` table (or add `is_duplicate` + `duplicate_group_id`
+# columns to `item_data`).  This endpoint would then become a simple
+# SELECT ... WHERE is_duplicate = true with pagination — no live GROUP BY/JOIN.
+# The two full-table GROUP BY scans below are O(N) on every page load and will
+# time out once `item_data` grows past ~500k rows.
+@item_duplicate_bp.route("/duplicates", methods=["GET"])
 def get_duplicate_items():
     db: Session = SessionLocal()
     try:
+        # Stopgap: cap MySQL query execution time to 30 seconds so a slow
+        # query returns a clear timeout error instead of dropping the connection.
+        db.execute(text("SET SESSION max_execution_time = 30000"))
+
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 10))
         offset = (page - 1) * limit
 
-        # Step 1: Group by duplicate keys
-        duplicate_groups = (
-            db.query(
-                ItemData.name,
-                ItemData.category,
-                ItemData.sub_category,
-                ItemData.email,
-                ItemData.city,
-                ItemData.area,
-                ItemData.address,
-                func.count(ItemData.id).label("count"),
-            )
-            .group_by(
-                ItemData.name,
-                ItemData.category,
-                ItemData.sub_category,
-                ItemData.email,
-                ItemData.city,
-                ItemData.area,
-                ItemData.address,
-            )
-            .having(func.count(ItemData.id) > 1)
-            .subquery()
-        )
+        # Simple duplicate flag query
+        duplicates_query = db.query(ItemData).filter(ItemData.is_duplicate == True)
 
-        # Step 2: Subquery to find minimum ID (first occurrence) of each duplicate group
-        min_ids_subquery = (
-            db.query(
-                func.min(ItemData.id).label("min_id")
-            )
-            .group_by(
-                ItemData.name,
-                ItemData.category,
-                ItemData.sub_category,
-                ItemData.email,
-                ItemData.city,
-                ItemData.area,
-                ItemData.address,
-            )
-            .having(func.count(ItemData.id) > 1)
-            .subquery()
-        )
-
-        # Step 3: Join with duplicate groups, and filter where ID != min_id (getting the duplicates we want to show/delete)
-        duplicates_query = (
-            db.query(ItemData)
-            .join(
-                duplicate_groups,
-                and_(
-                    ItemData.name == duplicate_groups.c.name,
-                    ItemData.category == duplicate_groups.c.category,
-                    ItemData.sub_category == duplicate_groups.c.sub_category,
-                    ItemData.email == duplicate_groups.c.email,
-                    ItemData.city == duplicate_groups.c.city,
-                    ItemData.area == duplicate_groups.c.area,
-                    ItemData.address == duplicate_groups.c.address,
-                ),
-            )
-            .outerjoin(
-                min_ids_subquery,
-                ItemData.id == min_ids_subquery.c.min_id
-            )
-            .filter(
-                min_ids_subquery.c.min_id.is_(None)
-            )
-        )
 
         # Apply search and city filters
         search = request.args.get("search", "").strip()
@@ -290,20 +239,39 @@ def get_duplicate_items():
         result = [serialize(item) for item in paginated_duplicates]
 
         return jsonify({
-            "success": True,
-            "page": page,
-            "limit": limit,
-            "total": total_duplicates,
-            "total_pages": (total_duplicates + limit - 1) // limit,
-            "items": result,
-        })
+    "success": True,
+    "page": page,
+    "limit": limit,
+    "total_records": total_duplicates,
+    "total_pages": (total_duplicates + limit - 1) // limit,
+    "data": result,
+})
+
+    except OperationalError as e:
+        # MySQL connection drop or query timeout (max_execution_time exceeded)
+        error_msg = str(e.orig) if hasattr(e, "orig") else str(e)
+        print(f"[DUPLICATE QUERY] OperationalError: {error_msg}")
+        return jsonify({
+            "success": False,
+            "message": "Duplicate query timed out — the dataset is too large for live computation. "
+                       "A precomputed duplicate table (Celery task) is needed.",
+            "error": error_msg,
+        }), 504
+
+    except Exception as e:
+        print(f"[DUPLICATE QUERY] Unexpected error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Failed to fetch duplicate data",
+            "error": str(e),
+        }), 500
 
     finally:
         db.close()
 
 
 # ---------------- DUPLICATES DELETE ----------------
-@item_duplicate_bp.route("/items/duplicates", methods=["DELETE"])
+@item_duplicate_bp.route("/duplicates", methods=["DELETE"])
 def delete_selected_duplicates():
     db: Session = SessionLocal()
     try:

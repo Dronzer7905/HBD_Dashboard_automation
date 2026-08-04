@@ -14,11 +14,12 @@ import {
   ArrowDownTrayIcon
 } from "@heroicons/react/24/solid";
 import * as XLSX from "xlsx/dist/xlsx.full.min.js";
+import api from "../../configs/api";
 
 const duplicateColumns = [
   { key: "name", label: "Business Name", width: 220 },
   { key: "address", label: "Address", width: 320 },
-  { key: "phone_number", label: "Contact No", width: 140 },
+  { key: "phone_no_1", label: "Contact No", width: 140 },
   { key: "category", label: "Category", width: 160 },
   { key: "city", label: "City", width: 120 },
   { key: "area", label: "Area", width: 140 },
@@ -41,26 +42,32 @@ const DuplicateData = () => {
     setLoading(true);
     setError(null);
     try {
-      const queryParams = new URLSearchParams({
-        source: "duplicate", // Adjusted source to request duplicate entries
-        page: currentPage,
-        limit: limit,
-        search: search,
-        city: citySearch,
+      // Because we added /api to baseURL in api.js, this will hit http://127.0.0.1:8001/api/items/duplicates
+      const response = await api.get("/items/duplicates", { 
+        params: { 
+          source: "duplicate", 
+          page: currentPage, 
+          limit: limit, 
+          search: search, 
+          city: citySearch 
+        } 
       });
-
-      const response = await fetch(`/?${queryParams}`);
       
-      if (!response.ok) throw new Error("Backend connection failed");
-
-      const result = await response.json();
+      const result = response.data;
+      console.log("ACTUAL BACKEND DATA:", result);
       
       setPageData(result.data || []);
       setTotalPages(result.total_pages || 1);
-      setTotalRecords(result.total_count || 0);
+      setTotalRecords(result.total_records || 0);
     } catch (err) {
       console.error("Fetch Error:", err);
-      setError("Failed to Fetch data from backend");
+      if (err.response && err.response.status === 401) {
+        setError("Session expired — please log in again");
+        window.location.href = "/auth/sign-in";
+      } else {
+        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || "Failed to Fetch data from backend";
+        setError(`Error (${err.response?.status || "Network"}): ${errorMsg}`);
+      }
     } finally {
       setLoading(false);
     }
