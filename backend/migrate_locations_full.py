@@ -1,0 +1,312 @@
+"""
+🚀 High-Performance Hierarchical Location Migration Script
+🌎 Migrates the entire Location_Master_India database into the structured 3-table tree schema in seconds.
+⚡ Uses optimized 3-phase memory mapping to avoid database query roundtrips.
+"""
+import os
+import sys
+import uuid
+import re
+from datetime import datetime
+from sqlalchemy import text
+
+sys.path.append(os.path.dirname(__file__))
+from app import app, db
+
+# Support UTF-8 output on Windows terminals to prevent charmap encoding errors
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+def create_slug(text_val):
+    """Converts a name string to an alphanumeric URL-safe slug."""
+    val = str(text_val).lower().strip()
+    val = re.sub(r"[^\w\s-]", "", val)
+    val = re.sub(r"[-\s]+", "-", val)
+    return val
+
+def ensure_tables_exist(conn):
+    print("Checking if hierarchical location tables exist...")
+    
+    # 1. location_master (Supports 7 levels and composite parent_id + slug unique key)
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS location_master (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            uuid VARCHAR(36) NOT NULL,
+            parent_id BIGINT DEFAULT NULL,
+            location_level TINYINT NOT NULL COMMENT '1=Country, 2=State, 3=City, 4=Area, 5=Locality, 6=Street, 7=Building',
+            location_type VARCHAR(30) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            short_name VARCHAR(100) DEFAULT NULL,
+            slug VARCHAR(255) NOT NULL,
+            code VARCHAR(50) DEFAULT NULL,
+            alternate_name VARCHAR(255) DEFAULT NULL,
+            description TEXT DEFAULT NULL,
+            latitude DECIMAL(10,7) DEFAULT NULL,
+            longitude DECIMAL(10,7) DEFAULT NULL,
+            timezone VARCHAR(100) DEFAULT 'Asia/Kolkata',
+            postal_code VARCHAR(20) DEFAULT NULL,
+            materialized_path VARCHAR(255) DEFAULT NULL,
+            status VARCHAR(20) DEFAULT 'Active',
+            metadata JSON DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (parent_id) REFERENCES location_master(id) ON DELETE SET NULL,
+            UNIQUE KEY uq_parent_slug (parent_id, slug),
+            UNIQUE KEY uq_uuid (uuid),
+            INDEX idx_parent_type (parent_id, location_type),
+            INDEX idx_postal_code (postal_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    """))
+
+    # 2. location_aliases
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS location_aliases (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            location_id BIGINT NOT NULL,
+            alias VARCHAR(255) NOT NULL,
+            alias_type VARCHAR(30) DEFAULT 'Local',
+            language_id BIGINT DEFAULT NULL,
+            is_primary BOOLEAN DEFAULT FALSE,
+            search_weight SMALLINT DEFAULT 100,
+            status VARCHAR(20) DEFAULT 'Active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (location_id) REFERENCES location_master(id) ON DELETE CASCADE,
+            UNIQUE KEY uq_loc_alias (location_id, alias),
+            INDEX idx_alias_search (alias)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    """))
+
+    # 3. location_postal_codes
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS location_postal_codes (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            location_id BIGINT NOT NULL,
+            postal_code VARCHAR(20) NOT NULL,
+            area_name VARCHAR(255) DEFAULT NULL,
+            is_primary BOOLEAN DEFAULT TRUE,
+            delivery_available BOOLEAN DEFAULT TRUE,
+            status VARCHAR(20) DEFAULT 'Active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (location_id) REFERENCES location_master(id) ON DELETE CASCADE,
+            UNIQUE KEY uq_loc_postal (location_id, postal_code),
+            INDEX idx_postal_code (postal_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    """))
+    print("✅ Hierarchical location tables verified/created successfully.")
+
+def build_cache(conn):
+    """Loads all existing hierarchical records into RAM to skip duplicate queries."""
+    print("Caching existing locations from location_master...")
+    state_cache = {}  # name.lower() -> id
+    city_cache = {}   # (parent_state_id, name.lower()) -> id
+    area_cache = {}   # (parent_city_id, name.lower()) -> id
+    
+    # Load States
+    states = conn.execute(text("SELECT id, name FROM location_master WHERE location_level = 2")).fetchall()
+    for row in states:
+        state_cache[row.name.strip().lower()] = row.id
+        
+    # Load Cities
+    cities = conn.execute(text("SELECT id, parent_id, name FROM location_master WHERE location_level = 3")).fetchall()
+    for row in cities:
+        city_cache[(row.parent_id, row.name.strip().lower())] = row.id
+        
+    # Load Areas
+    areas = conn.execute(text("SELECT id, parent_id, name FROM location_master WHERE location_level = 4")).fetchall()
+    for row in areas:
+        area_cache[(row.parent_id, row.name.strip().lower())] = row.id
+        
+    print(f"Cached {len(state_cache)} States, {len(city_cache)} Cities, and {len(area_cache)} Areas.")
+    return state_cache, city_cache, area_cache
+
+def main():
+    print("=============================================================")
+    print("🚀 RUNNING FULL HIERARCHICAL LOCATION MIGRATION")
+    print("=============================================================\n")
+
+    with app.app_context():
+        engine = db.engine
+        
+        with engine.connect() as conn:
+            ensure_tables_exist(conn)
+            
+            # Verify source table exists
+            has_source = conn.execute(text("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Location_Master_India'")).scalar() > 0
+            if not has_source:
+                print("❌ Error: 'Location_Master_India' table does not exist. Migration aborted.")
+                return
+                
+            # Build memory caches
+            state_cache, city_cache, area_cache = build_cache(conn)
+            
+            # 1. Create or Get Country Node (India)
+            country_id = conn.execute(text("SELECT id FROM location_master WHERE location_level = 1 AND name = 'India'")).scalar()
+            if not country_id:
+                print("Inserting Country Node (India)...")
+                conn.execute(text("""
+                    INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
+                    VALUES (:uuid, NULL, 1, 'Country', 'India', 'india')
+                """), {"uuid": str(uuid.uuid4())})
+                conn.commit()
+                country_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+            print(f"🌐 Country Root Node ID: {country_id}")
+
+            # -----------------------------------------------------------------
+            # PHASE 1: Migrate Unique States
+            # -----------------------------------------------------------------
+            print("\n🔄 Phase 1: Migrating unique states...")
+            raw_states = conn.execute(text("SELECT DISTINCT BINARY state AS sname FROM Location_Master_India WHERE state IS NOT NULL AND state != ''")).fetchall()
+            for r in raw_states:
+                sname = r.sname.strip()
+                skey = sname.lower()
+                if skey not in state_cache:
+                    node_uuid = str(uuid.uuid4())
+                    slug = create_slug(sname)
+                    try:
+                        conn.execute(text("""
+                            INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
+                            VALUES (:uuid, :pid, 2, 'State', :name, :slug)
+                        """), {"uuid": node_uuid, "pid": country_id, "name": sname, "slug": slug})
+                        conn.commit()
+                        state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+                    except Exception:
+                        # Append unique slug suffix in case of collision
+                        slug = f"{slug}-{node_uuid[:8]}"
+                        conn.execute(text("""
+                            INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
+                            VALUES (:uuid, :pid, 2, 'State', :name, :slug)
+                        """), {"uuid": node_uuid, "pid": country_id, "name": sname, "slug": slug})
+                        conn.commit()
+                        state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+                    state_cache[skey] = state_id
+            print(f"✅ State Migration Complete. Total cached states: {len(state_cache)}")
+
+            # -----------------------------------------------------------------
+            # PHASE 2: Migrate Unique Cities
+            # -----------------------------------------------------------------
+            print("\n🔄 Phase 2: Migrating unique cities...")
+            raw_cities = conn.execute(text("""
+                SELECT DISTINCT BINARY state AS sname, BINARY city AS cname 
+                FROM Location_Master_India 
+                WHERE state IS NOT NULL AND city IS NOT NULL AND city != ''
+            """)).fetchall()
+            
+            cities_to_insert = []
+            for r in raw_cities:
+                sname = r.sname.strip()
+                cname = r.cname.strip()
+                s_id = state_cache.get(sname.lower())
+                if s_id and (s_id, cname.lower()) not in city_cache:
+                    cities_to_insert.append((s_id, cname))
+            
+            if cities_to_insert:
+                print(f"Found {len(cities_to_insert):,} new cities to insert. Inserting in batches of 2000...")
+                batch = []
+                for idx, (s_id, cname) in enumerate(cities_to_insert):
+                    node_uuid = str(uuid.uuid4())
+                    slug = create_slug(cname)
+                    batch.append({
+                        "uuid": node_uuid,
+                        "parent_id": s_id,
+                        "name": cname,
+                        "slug": slug
+                    })
+                    
+                    if len(batch) >= 2000 or idx == len(cities_to_insert) - 1:
+                        # Insert batch
+                        conn.execute(text("""
+                            INSERT IGNORE INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
+                            VALUES (:uuid, :parent_id, 3, 'City', :name, :slug)
+                        """), batch)
+                        conn.commit()
+                        batch = []
+                
+                # Re-fetch new cities to populate cache mapping
+                new_cities = conn.execute(text("SELECT id, parent_id, name FROM location_master WHERE location_level = 3")).fetchall()
+                for row in new_cities:
+                    city_cache[(row.parent_id, row.name.strip().lower())] = row.id
+            print(f"✅ City Migration Complete. Total cached cities: {len(city_cache)}")
+
+            # -----------------------------------------------------------------
+            # PHASE 3: Migrate Unique Areas & Postal Codes
+            # -----------------------------------------------------------------
+            print("\n🔄 Phase 3: Migrating unique areas and postal codes...")
+            raw_areas = conn.execute(text("""
+                SELECT DISTINCT BINARY state AS sname, BINARY city AS cname, BINARY area AS aname, pincode 
+                FROM Location_Master_India 
+                WHERE state IS NOT NULL AND city IS NOT NULL AND area IS NOT NULL AND area != ''
+            """)).fetchall()
+            
+            areas_to_insert = []
+            for r in raw_areas:
+                sname = r.sname.strip()
+                cname = r.cname.strip()
+                aname = r.aname.strip()
+                pcode = str(r.pincode).strip() if r.pincode else None
+                
+                s_id = state_cache.get(sname.lower())
+                if s_id:
+                    c_id = city_cache.get((s_id, cname.lower()))
+                    if c_id and (c_id, aname.lower()) not in area_cache:
+                        areas_to_insert.append((c_id, aname, pcode))
+                        
+            if areas_to_insert:
+                print(f"Found {len(areas_to_insert):,} new areas to insert. Processing in batches of 5000...")
+                batch = []
+                for idx, (c_id, aname, pcode) in enumerate(areas_to_insert):
+                    node_uuid = str(uuid.uuid4())
+                    slug = create_slug(aname)
+                    batch.append({
+                        "uuid": node_uuid,
+                        "parent_id": c_id,
+                        "name": aname,
+                        "slug": slug,
+                        "pcode": pcode
+                    })
+                    
+                    if len(batch) >= 5000 or idx == len(areas_to_insert) - 1:
+                        conn.execute(text("""
+                            INSERT IGNORE INTO location_master (uuid, parent_id, location_level, location_type, name, slug, postal_code)
+                            VALUES (:uuid, :parent_id, 4, 'Area', :name, :slug, :pcode)
+                        """), batch)
+                        conn.commit()
+                        batch = []
+                        
+                # Re-fetch new areas to populate cache mapping
+                new_areas = conn.execute(text("SELECT id, parent_id, name, postal_code FROM location_master WHERE location_level = 4")).fetchall()
+                for row in new_areas:
+                    area_cache[(row.parent_id, row.name.strip().lower())] = row.id
+                    
+                # Batch insert PIN codes into location_postal_codes table
+                print("Populating location_postal_codes bridge table...")
+                postal_batch = []
+                for row in new_areas:
+                    if row.postal_code:
+                        postal_batch.append({
+                            "loc_id": row.id,
+                            "pcode": str(row.postal_code).strip(),
+                            "aname": row.name
+                        })
+                        if len(postal_batch) >= 5000:
+                            conn.execute(text("""
+                                INSERT IGNORE INTO location_postal_codes (location_id, postal_code, area_name)
+                                VALUES (:loc_id, :pcode, :aname)
+                            """), postal_batch)
+                            conn.commit()
+                            postal_batch = []
+                if postal_batch:
+                    conn.execute(text("""
+                        INSERT IGNORE INTO location_postal_codes (location_id, postal_code, area_name)
+                        VALUES (:loc_id, :pcode, :aname)
+                    """), postal_batch)
+                    conn.commit()
+            
+            print(f"✅ Area & Postal Code Migration Complete. Total cached areas: {len(area_cache)}")
+            print("\n=============================================================")
+            print("🎉 FULL LOCATION HIERARCHY MIGRATION COMPLETED SUCCESSFULLY!")
+            print("=============================================================")
+
+if __name__ == "__main__":
+    main()
