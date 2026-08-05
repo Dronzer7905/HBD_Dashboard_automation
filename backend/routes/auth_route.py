@@ -50,6 +50,12 @@ def login():
 
     # Correctly queries the DB using the updated model
     user = User.query.filter_by(email=email).first()
+    
+    print(f"[DEBUG LOGIN] Attempting login for email: '{email}'")
+    if user:
+        print(f"[DEBUG LOGIN] User found in DB. DB password: '{user.password}', Provided password: '{password}'")
+    else:
+        print("[DEBUG LOGIN] User NOT found in DB!")
 
     # Uses the plain-text check we defined in model/user.py
     if not user or not user.check_password(password):

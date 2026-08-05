@@ -215,6 +215,7 @@ PUBLIC_ROUTES = [
     "/api/auth/verify-otp",
     "/api/auth/reset-password",
     "/health",
+    "/api/health",
     "/master_table/list",
     "/master-dashboard-stats",
     "/atm/fetch-data",
@@ -395,6 +396,7 @@ def index():
     return jsonify({"message": "Flask API is running! Clean and Modular."})
 
 @app.route('/health')
+@app.route('/api/health')
 def health_check():
     return jsonify({"status": "ok", "message": "Backend is reachable"})
 
