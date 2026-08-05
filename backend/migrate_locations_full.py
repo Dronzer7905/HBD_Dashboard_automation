@@ -158,7 +158,7 @@ def main():
             # PHASE 1: Migrate Unique States
             # -----------------------------------------------------------------
             print("\n🔄 Phase 1: Migrating unique states...")
-            raw_states = conn.execute(text("SELECT DISTINCT BINARY state AS sname FROM Location_Master_India WHERE state IS NOT NULL AND state != ''")).fetchall()
+            raw_states = conn.execute(text("SELECT DISTINCT BINARY state_full_name AS sname FROM Location_Master_India WHERE state_full_name IS NOT NULL AND state_full_name != ''")).fetchall()
             for r in raw_states:
                 sname = r.sname.strip()
                 skey = sname.lower()
@@ -201,9 +201,9 @@ def main():
                 print(f"⚠️ Warning: Could not read Top_cities_rank table. City ranks will not be populated: {e}")
 
             raw_cities = conn.execute(text("""
-                SELECT DISTINCT BINARY state AS sname, BINARY city AS cname 
+                SELECT DISTINCT BINARY state_full_name AS sname, BINARY city_name AS cname 
                 FROM Location_Master_India 
-                WHERE state IS NOT NULL AND city IS NOT NULL AND city != ''
+                WHERE state_full_name IS NOT NULL AND city_name IS NOT NULL AND city_name != ''
             """)).fetchall()
             
             cities_to_insert = []
@@ -250,9 +250,19 @@ def main():
             # -----------------------------------------------------------------
             print("\n🔄 Phase 3: Migrating unique areas and postal codes...")
             raw_areas = conn.execute(text("""
-                SELECT DISTINCT BINARY state AS sname, BINARY city AS cname, BINARY area AS aname, pincode 
-                FROM Location_Master_India 
-                WHERE state IS NOT NULL AND city IS NOT NULL AND area IS NOT NULL AND area != ''
+                SELECT DISTINCT 
+                    l.state_full_name AS sname, 
+                    l.city_name AS cname, 
+                    l.area_name AS aname,
+                    m.pincode AS pincode
+                FROM Location_Master_India l
+                LEFT JOIN (
+                    SELECT city, area, MAX(pincode) as pincode
+                    FROM master_table
+                    WHERE pincode IS NOT NULL AND pincode != ''
+                    GROUP BY city, area
+                ) m ON l.city_name = m.city AND l.area_name = m.area
+                WHERE l.state_full_name IS NOT NULL AND l.city_name IS NOT NULL AND l.area_name IS NOT NULL AND l.area_name != ''
             """)).fetchall()
             
             areas_to_insert = []

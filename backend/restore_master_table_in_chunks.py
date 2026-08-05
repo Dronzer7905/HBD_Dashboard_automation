@@ -24,10 +24,58 @@ def main():
         except Exception:
             pass
 
-        backup_table = "master_table_backup_20260729_133150"
+        # Prompt or accept backup table name from CLI
+        if len(sys.argv) > 1:
+            backup_table = sys.argv[1].strip()
+        else:
+            backup_table = input("Enter backup table name to restore from: ").strip()
+
+        if not backup_table:
+            print("❌ Error: No backup table name provided.")
+            return
+
+        # Verify backup table exists
+        exists_query = text("""
+            SELECT COUNT(*) 
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tname
+        """)
+        if db.session.execute(exists_query, {"tname": backup_table}).scalar() == 0:
+            print(f"❌ Error: Backup table '{backup_table}' does not exist in the database.")
+            return
         
+        # Check if there are active rows in master_table missing from the backup
+        print(f"Checking for any records in 'master_table' missing from '{backup_table}'...")
+        try:
+            check_sql = text(f"""
+                SELECT COUNT(1) 
+                FROM master_table m
+                LEFT JOIN {backup_table} b ON m.global_business_id = b.global_business_id
+                WHERE b.global_business_id IS NULL
+            """)
+            missing_count = db.session.execute(check_sql).scalar() or 0
+            if missing_count > 0:
+                print(f"⚠️ Warning: Found {missing_count:,} records in 'master_table' that are missing in backup!")
+                confirm = input("Would you like to copy these missing records into the backup before restoring? (yes/no): ").strip().lower()
+                if confirm in ('yes', 'y'):
+                    print("Copying missing records to backup table...")
+                    merge_sql = text(f"""
+                        INSERT INTO {backup_table}
+                        SELECT m.*
+                        FROM master_table m
+                        LEFT JOIN {backup_table} b ON m.global_business_id = b.global_business_id
+                        WHERE b.global_business_id IS NULL
+                    """)
+                    db.session.execute(merge_sql)
+                    db.session.commit()
+                    print("✅ Backup table successfully updated with missing records.")
+                else:
+                    print("⚠️ Proceeding without saving active records. Those records will be deleted from master_table!")
+        except Exception as check_err:
+            print(f"⚠️ Warning: Could not perform safety checks (skipping): {check_err}")
+
         # 1. Get min and max ID to run chunked query
-        print(f"Analyzing snapshot '{backup_table}'...")
+        print(f"\nAnalyzing snapshot '{backup_table}'...")
         limits_query = text(f"SELECT MIN(id), MAX(id), COUNT(*) FROM {backup_table}")
         res = db.session.execute(limits_query).fetchone()
         
@@ -41,7 +89,12 @@ def main():
         print(f"👉 Range of IDs:         {min_id:,} to {max_id:,}\n")
 
         # 2. Confirm truncate of the empty/dirty master_table
-        print("Clearing target 'master_table' before restoring...")
+        confirm_trunc = input(f"Are you sure you want to TRUNCATE 'master_table' and restore from '{backup_table}'? (yes/no): ").strip().lower()
+        if confirm_trunc not in ('yes', 'y'):
+            print("❌ Restoration aborted by user.")
+            return
+
+        print("\nClearing target 'master_table' before restoring...")
         db.session.execute(text("TRUNCATE TABLE master_table;"))
         db.session.commit()
         print("✅ Target 'master_table' truncated.\n")

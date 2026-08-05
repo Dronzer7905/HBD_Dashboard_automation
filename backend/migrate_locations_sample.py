@@ -170,9 +170,9 @@ def main():
             print("Fetching sample records from Location_Master_India...")
             # Fetch a sample of 30 rows of distinct locations
             sample_query = text("""
-                SELECT state, city, area, pincode 
+                SELECT state_full_name AS state, city_name AS city, area_name AS area, NULL AS pincode 
                 FROM Location_Master_India 
-                WHERE state IS NOT NULL AND city IS NOT NULL AND area IS NOT NULL
+                WHERE state_full_name IS NOT NULL AND city_name IS NOT NULL AND area_name IS NOT NULL
                 LIMIT 30
             """)
             rows = conn.execute(sample_query).fetchall()
