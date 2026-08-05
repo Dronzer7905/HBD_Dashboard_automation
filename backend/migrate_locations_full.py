@@ -47,6 +47,7 @@ def ensure_tables_exist(conn):
             postal_code VARCHAR(20) DEFAULT NULL,
             materialized_path VARCHAR(255) DEFAULT NULL,
             status VARCHAR(20) DEFAULT 'Active',
+            city_rank INT DEFAULT NULL,
             metadata JSON DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -187,6 +188,18 @@ def main():
             # PHASE 2: Migrate Unique Cities
             # -----------------------------------------------------------------
             print("\n🔄 Phase 2: Migrating unique cities...")
+            
+            # Load City Ranks
+            print("Caching city ranks from Top_cities_rank...")
+            city_ranks = {} # (state_name.lower(), city_name.lower()) -> city_rank
+            try:
+                ranks = conn.execute(text("SELECT LOWER(state_name) as sname, LOWER(city_name) as cname, city_rank FROM Top_cities_rank")).fetchall()
+                for row in ranks:
+                    city_ranks[(row.sname.strip(), row.cname.strip())] = row.city_rank
+                print(f"Cached {len(city_ranks)} city ranks.")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not read Top_cities_rank table. City ranks will not be populated: {e}")
+
             raw_cities = conn.execute(text("""
                 SELECT DISTINCT BINARY state AS sname, BINARY city AS cname 
                 FROM Location_Master_India 
@@ -199,26 +212,29 @@ def main():
                 cname = r.cname.strip()
                 s_id = state_cache.get(sname.lower())
                 if s_id and (s_id, cname.lower()) not in city_cache:
-                    cities_to_insert.append((s_id, cname))
+                    # Look up city_rank
+                    rank = city_ranks.get((sname.lower(), cname.lower()))
+                    cities_to_insert.append((s_id, cname, rank))
             
             if cities_to_insert:
                 print(f"Found {len(cities_to_insert):,} new cities to insert. Inserting in batches of 2000...")
                 batch = []
-                for idx, (s_id, cname) in enumerate(cities_to_insert):
+                for idx, (s_id, cname, rank) in enumerate(cities_to_insert):
                     node_uuid = str(uuid.uuid4())
                     slug = create_slug(cname)
                     batch.append({
                         "uuid": node_uuid,
                         "parent_id": s_id,
                         "name": cname,
-                        "slug": slug
+                        "slug": slug,
+                        "city_rank": rank
                     })
                     
                     if len(batch) >= 2000 or idx == len(cities_to_insert) - 1:
                         # Insert batch
                         conn.execute(text("""
-                            INSERT IGNORE INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
-                            VALUES (:uuid, :parent_id, 3, 'City', :name, :slug)
+                            INSERT IGNORE INTO location_master (uuid, parent_id, location_level, location_type, name, slug, city_rank)
+                            VALUES (:uuid, :parent_id, 3, 'City', :name, :slug, :city_rank)
                         """), batch)
                         conn.commit()
                         batch = []

@@ -47,6 +47,7 @@ def ensure_tables_exist(conn):
             postal_code VARCHAR(20) DEFAULT NULL,
             materialized_path VARCHAR(255) DEFAULT NULL,
             status VARCHAR(20) DEFAULT 'Active',
+            city_rank INT DEFAULT NULL,
             metadata JSON DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
