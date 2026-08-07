@@ -58,20 +58,31 @@ def main():
                 print(f"⚠️ Warning: Found {missing_count:,} records in 'master_table' that are missing in backup!")
                 confirm = input("Would you like to copy these missing records into the backup before restoring? (yes/no): ").strip().lower()
                 if confirm in ('yes', 'y'):
-                    print("Copying missing records to backup table...")
-                    merge_sql = text(f"""
-                        INSERT INTO {backup_table}
-                        SELECT m.*
-                        FROM master_table m
-                        LEFT JOIN {backup_table} b ON m.global_business_id = b.global_business_id
-                        WHERE b.global_business_id IS NULL
-                    """)
-                    db.session.execute(merge_sql)
-                    db.session.commit()
+                    print("Copying missing records to backup table in chunks...")
+                    
+                    # Fetch limits of master_table
+                    m_limits = db.session.execute(text("SELECT MIN(id), MAX(id) FROM master_table")).fetchone()
+                    min_m_id, max_m_id = m_limits[0] or 1, m_limits[1] or 1
+                    
+                    m_chunk_size = 200000
+                    for start_m in range(min_m_id, max_m_id + 1, m_chunk_size):
+                        end_m = start_m + m_chunk_size
+                        merge_sql = text(f"""
+                            INSERT INTO {backup_table}
+                            SELECT m.*
+                            FROM master_table m
+                            LEFT JOIN {backup_table} b ON m.global_business_id = b.global_business_id
+                            WHERE m.id >= :start AND m.id < :end AND b.global_business_id IS NULL
+                        """)
+                        db.session.execute(merge_sql, {"start": start_m, "end": end_m})
+                        db.session.commit()
+                        print(f"  Processed master_table range {start_m:,} to {end_m:,}...")
+                    
                     print("✅ Backup table successfully updated with missing records.")
                 else:
                     print("⚠️ Proceeding without saving active records. Those records will be deleted from master_table!")
         except Exception as check_err:
+            db.session.rollback()
             print(f"⚠️ Warning: Could not perform safety checks (skipping): {check_err}")
 
         # 1. Get min and max ID to run chunked query
