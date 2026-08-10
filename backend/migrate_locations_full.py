@@ -322,14 +322,27 @@ def main():
                             """), postal_batch)
                             conn.commit()
                             postal_batch = []
-                if postal_batch:
-                    conn.execute(text("""
-                        INSERT IGNORE INTO location_postal_codes (location_id, postal_code, area_name)
-                        VALUES (:loc_id, :pcode, :aname)
-                    """), postal_batch)
                     conn.commit()
             
             print(f"✅ Area & Postal Code Migration Complete. Total cached areas: {len(area_cache)}")
+
+            # -----------------------------------------------------------------
+            # PHASE 4: Populate State Short Code Aliases
+            # -----------------------------------------------------------------
+            print("\n🔄 Phase 4: Populating location_aliases with state short codes...")
+            alias_sql = text("""
+                INSERT IGNORE INTO location_aliases (location_id, alias, alias_type, is_primary)
+                SELECT DISTINCT lm.id, TRIM(lmi.state_short_code), 'Short Code', TRUE
+                FROM location_master lm
+                JOIN Location_Master_India lmi ON LOWER(lm.name) = LOWER(lmi.state_full_name)
+                WHERE lm.location_level = 2 
+                  AND lmi.state_short_code IS NOT NULL 
+                  AND TRIM(lmi.state_short_code) != ''
+            """)
+            r_alias = conn.execute(alias_sql)
+            conn.commit()
+            print(f"✅ State short code aliases populated: {r_alias.rowcount} rows inserted.")
+            
             print("\n=============================================================")
             print("🎉 FULL LOCATION HIERARCHY MIGRATION COMPLETED SUCCESSFULLY!")
             print("=============================================================")
