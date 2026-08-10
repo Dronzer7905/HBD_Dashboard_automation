@@ -17,6 +17,45 @@ from app import app, db
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+STATE_STANDARD_MAP = {
+    "mh": "Maharashtra", "maharashtra": "Maharashtra", "maharastra": "Maharashtra",
+    "gj": "Gujarat", "gujarat": "Gujarat",
+    "dl": "Delhi", "delhi": "Delhi", "new delhi": "Delhi", "nct of delhi": "Delhi",
+    "ka": "Karnataka", "karnataka": "Karnataka",
+    "tn": "Tamil Nadu", "tamil nadu": "Tamil Nadu", "tamilnadu": "Tamil Nadu",
+    "ap": "Andhra Pradesh", "andhra pradesh": "Andhra Pradesh",
+    "tg": "Telangana", "telangana": "Telangana", "ts": "Telangana", "ts-telangana": "Telangana",
+    "up": "Uttar Pradesh", "uttar pradesh": "Uttar Pradesh",
+    "mp": "Madhya Pradesh", "madhya pradesh": "Madhya Pradesh",
+    "wb": "West Bengal", "west bengal": "West Bengal",
+    "hr": "Haryana", "haryana": "Haryana",
+    "pb": "Punjab", "punjab": "Punjab",
+    "rj": "Rajasthan", "rajasthan": "Rajasthan",
+    "or": "Odisha", "odisha": "Odisha", "orissa": "Odisha",
+    "kl": "Kerala", "kerala": "Kerala",
+    "br": "Bihar", "bihar": "Bihar",
+    "jh": "Jharkhand", "jharkhand": "Jharkhand",
+    "ct": "Chhattisgarh", "chhattisgarh": "Chhattisgarh", "chattisgarh": "Chhattisgarh",
+    "as": "Assam", "assam": "Assam",
+    "jk": "Jammu & Kashmir", "jammu & kashmir": "Jammu & Kashmir", "jammu and kashmir": "Jammu & Kashmir",
+    "ut": "Uttarakhand", "uttarakhand": "Uttarakhand", "uttaranchal": "Uttarakhand",
+    "hp": "Himachal Pradesh", "himachal pradesh": "Himachal Pradesh",
+    "tr": "Tripura", "tripura": "Tripura",
+    "ml": "Meghalaya", "meghalaya": "Meghalaya",
+    "mn": "Manipur", "manipur": "Manipur",
+    "nl": "Nagaland", "nagaland": "Nagaland",
+    "goa": "Goa", "ga": "Goa",
+    "ar": "Arunachal Pradesh", "arunachal pradesh": "Arunachal Pradesh",
+    "mz": "Mizoram", "mizoram": "Mizoram",
+    "sk": "Sikkim", "sikkim": "Sikkim",
+    "py": "Puducherry", "puducherry": "Puducherry", "pondicherry": "Puducherry",
+    "ch": "Chandigarh", "chandigarh": "Chandigarh",
+    "an": "Andaman & Nicobar", "andaman & nicobar": "Andaman & Nicobar", "andaman and nicobar": "Andaman & Nicobar", "andaman and nicobar islands": "Andaman & Nicobar",
+    "dn": "Dadra & Nagar Haveli and Daman & Diu", "daman & diu": "Dadra & Nagar Haveli and Daman & Diu", "daman and diu": "Dadra & Nagar Haveli and Daman & Diu", "dadra & nagar haveli": "Dadra & Nagar Haveli and Daman & Diu",
+    "ld": "Lakshadweep", "lakshadweep": "Lakshadweep",
+    "la": "Ladakh", "ladakh": "Ladakh"
+}
+
 def create_slug(text_val):
     """Converts a name string to an alphanumeric URL-safe slug."""
     val = str(text_val).lower().strip()
@@ -155,21 +194,28 @@ def main():
             print(f"🌐 Country Root Node ID: {country_id}")
 
             # -----------------------------------------------------------------
-            # PHASE 1: Migrate Unique States
+            # PHASE 1: Migrate Unique States (Standardized & Aliased)
             # -----------------------------------------------------------------
             print("\n🔄 Phase 1: Migrating unique states...")
             raw_states = conn.execute(text("SELECT DISTINCT BINARY state_full_name AS sname FROM Location_Master_India WHERE state_full_name IS NOT NULL AND state_full_name != ''")).fetchall()
+            state_aliases_to_insert = []
+            
             for r in raw_states:
-                sname = r.sname.strip()
-                skey = sname.lower()
+                raw_name = r.sname.strip()
+                raw_skey = raw_name.lower()
+                
+                # Clean and Standardize Name
+                standard_name = STATE_STANDARD_MAP.get(raw_skey, raw_name)
+                skey = standard_name.lower()
+                
                 if skey not in state_cache:
                     node_uuid = str(uuid.uuid4())
-                    slug = create_slug(sname)
+                    slug = create_slug(standard_name)
                     try:
                         conn.execute(text("""
                             INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
                             VALUES (:uuid, :pid, 2, 'State', :name, :slug)
-                        """), {"uuid": node_uuid, "pid": country_id, "name": sname, "slug": slug})
+                        """), {"uuid": node_uuid, "pid": country_id, "name": standard_name, "slug": slug})
                         conn.commit()
                         state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
                     except Exception:
@@ -178,11 +224,31 @@ def main():
                         conn.execute(text("""
                             INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
                             VALUES (:uuid, :pid, 2, 'State', :name, :slug)
-                        """), {"uuid": node_uuid, "pid": country_id, "name": sname, "slug": slug})
+                        """), {"uuid": node_uuid, "pid": country_id, "name": standard_name, "slug": slug})
                         conn.commit()
                         state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+                    
                     state_cache[skey] = state_id
-            print(f"✅ State Migration Complete. Total cached states: {len(state_cache)}")
+                
+                # Fetch standard state ID to map this raw spelling variation
+                state_id = state_cache[skey]
+                state_cache[raw_skey] = state_id # Map raw key to standard ID in cache
+                
+                # Store alias if spelling is different from the standardized name
+                if raw_skey != skey:
+                    state_aliases_to_insert.append((state_id, raw_name))
+            
+            # Batch insert state spelling aliases into location_aliases
+            if state_aliases_to_insert:
+                print(f"Populating state spelling aliases (Total: {len(state_aliases_to_insert)})...")
+                alias_batch = [{"loc_id": s_id, "alias": name} for s_id, name in state_aliases_to_insert]
+                conn.execute(text("""
+                    INSERT IGNORE INTO location_aliases (location_id, alias, alias_type, is_primary)
+                    VALUES (:loc_id, :alias, 'Spell Variation', FALSE)
+                """), alias_batch)
+                conn.commit()
+                
+            print(f"✅ State Migration Complete. Total cached states (including variations): {len(state_cache)}")
 
             # -----------------------------------------------------------------
             # PHASE 2: Migrate Unique Cities
