@@ -12,7 +12,7 @@ from extensions import db
 
 def debug():
     print("=============================================================")
-    print("🔍 DEBUGGING LOCATION MIGRATION PHASE 3 (AREAS)")
+    print("🔍 DEEP DEBUGGING LOCATION MIGRATION PHASE 3 (AREAS)")
     print("=============================================================\n")
 
     with app.app_context():
@@ -61,6 +61,62 @@ def debug():
             """)
             join_count = conn.execute(join_q).scalar() or 0
             print(f"👉 Full Phase 3 query returned: {join_count:,} rows.")
+
+            # 5. Trace the first 10 rows of the Phase 3 loop to see where it gets skipped
+            print("\nTracing first 10 rows of Phase 3 loop...")
+            trace_q = text("""
+                SELECT DISTINCT 
+                    l.state_full_name AS sname, 
+                    l.city_name AS cname, 
+                    l.area_name AS aname,
+                    m.pincode AS pincode
+                FROM Location_Master_India l
+                LEFT JOIN (
+                    SELECT city, area, MAX(pincode) as pincode
+                    FROM master_table
+                    WHERE pincode IS NOT NULL AND pincode != ''
+                    GROUP BY city, area
+                ) m ON l.city_name = m.city AND l.area_name = m.area
+                WHERE l.state_full_name IS NOT NULL AND l.city_name IS NOT NULL AND l.area_name IS NOT NULL AND l.area_name != ''
+                LIMIT 10
+            """)
+            trace_rows = conn.execute(trace_q).fetchall()
+            
+            # Load state and city caches exactly like the migration script does
+            state_cache = {}
+            states = conn.execute(text("SELECT id, name FROM location_master WHERE location_level = 2")).fetchall()
+            for row in states:
+                state_cache[row.name.strip().lower()] = row.id
+                
+            # Add state variations to cache (from location_aliases)
+            aliases = conn.execute(text("""
+                SELECT la.alias, la.location_id 
+                FROM location_aliases la
+                JOIN location_master lm ON la.location_id = lm.id
+                WHERE lm.location_level = 2
+            """)).fetchall()
+            for row in aliases:
+                state_cache[row.alias.strip().lower()] = row.location_id
+                
+            city_cache = {}
+            cities = conn.execute(text("SELECT id, parent_id, name FROM location_master WHERE location_level = 3")).fetchall()
+            for row in cities:
+                city_cache[(row.parent_id, row.name.strip().lower())] = row.id
+                
+            print(f"Loaded {len(state_cache)} states/aliases and {len(city_cache)} cities for debug trace.")
+            
+            for idx, r in enumerate(trace_rows, 1):
+                sname = r.sname.strip()
+                cname = r.cname.strip()
+                aname = r.aname.strip()
+                
+                s_id = state_cache.get(sname.lower())
+                c_id = city_cache.get((s_id, cname.lower())) if s_id else None
+                
+                print(f"Row {idx}:")
+                print(f"  Input State: '{sname}' -> cache key: '{sname.lower()}' -> s_id: {s_id}")
+                print(f"  Input City:  '{cname}' -> cache key: ({s_id}, '{cname.lower()}') -> c_id: {c_id}")
+                print(f"  Input Area:  '{aname}'")
 
 if __name__ == "__main__":
     debug()

@@ -315,21 +315,60 @@ def main():
             # PHASE 3: Migrate Unique Areas & Postal Codes
             # -----------------------------------------------------------------
             print("\n🔄 Phase 3: Migrating unique areas and postal codes...")
-            raw_areas = conn.execute(text("""
-                SELECT DISTINCT 
-                    l.state_full_name AS sname, 
-                    l.city_name AS cname, 
-                    l.area_name AS aname,
-                    m.pincode AS pincode
-                FROM Location_Master_India l
-                LEFT JOIN (
-                    SELECT city, area, MAX(pincode) as pincode
-                    FROM master_table
-                    WHERE pincode IS NOT NULL AND pincode != ''
-                    GROUP BY city, area
-                ) m ON l.city_name = m.city AND l.area_name = m.area
-                WHERE l.state_full_name IS NOT NULL AND l.city_name IS NOT NULL AND l.area_name IS NOT NULL AND l.area_name != ''
-            """)).fetchall()
+            
+            # Detect available columns in Location_Master_India dynamically to ensure compatibility
+            cols_res = conn.execute(text("SHOW COLUMNS FROM Location_Master_India")).fetchall()
+            available_cols = {r[0].lower() for r in cols_res}
+            print(f"Detected columns in Location_Master_India: {', '.join(available_cols)}")
+            
+            use_legacy = False
+            if 'area' in available_cols and 'city' in available_cols and 'state' in available_cols:
+                # If area_name column is missing or empty, fall back to legacy columns
+                if 'area_name' in available_cols:
+                    area_name_count = conn.execute(text("SELECT COUNT(*) FROM Location_Master_India WHERE area_name IS NOT NULL AND area_name != ''")).scalar() or 0
+                    if area_name_count == 0:
+                        print("Warning: 'area_name' column is empty! Falling back to legacy columns 'state', 'city', 'area'...")
+                        use_legacy = True
+                else:
+                    print("'area_name' column is missing. Falling back to legacy columns 'state', 'city', 'area'...")
+                    use_legacy = True
+            
+            if use_legacy:
+                print("Running unique areas extraction using legacy columns (state, city, area)...")
+                raw_areas_q = """
+                    SELECT DISTINCT 
+                        l.state AS sname, 
+                        l.city AS cname, 
+                        l.area AS aname,
+                        m.pincode AS pincode
+                    FROM Location_Master_India l
+                    LEFT JOIN (
+                        SELECT city, area, MAX(pincode) as pincode
+                        FROM master_table
+                        WHERE pincode IS NOT NULL AND pincode != ''
+                        GROUP BY city, area
+                    ) m ON l.city = m.city AND l.area = m.area
+                    WHERE l.state IS NOT NULL AND l.city IS NOT NULL AND l.area IS NOT NULL AND l.area != ''
+                """
+            else:
+                print("Running unique areas extraction using active columns (state_full_name, city_name, area_name)...")
+                raw_areas_q = """
+                    SELECT DISTINCT 
+                        l.state_full_name AS sname, 
+                        l.city_name AS cname, 
+                        l.area_name AS aname,
+                        m.pincode AS pincode
+                    FROM Location_Master_India l
+                    LEFT JOIN (
+                        SELECT city, area, MAX(pincode) as pincode
+                        FROM master_table
+                        WHERE pincode IS NOT NULL AND pincode != ''
+                        GROUP BY city, area
+                    ) m ON l.city_name = m.city AND l.area_name = m.area
+                    WHERE l.state_full_name IS NOT NULL AND l.city_name IS NOT NULL AND l.area_name IS NOT NULL AND l.area_name != ''
+                """
+                
+            raw_areas = conn.execute(text(raw_areas_q)).fetchall()
             
             areas_to_insert = []
             for r in raw_areas:
@@ -396,11 +435,15 @@ def main():
             # PHASE 4: Populate State Short Code Aliases
             # -----------------------------------------------------------------
             print("\n🔄 Phase 4: Populating location_aliases with state short codes...")
-            alias_sql = text("""
+            
+            # Use appropriate state column based on legacy fallback detection in Phase 3
+            state_col = "state" if use_legacy else "state_full_name"
+            
+            alias_sql = text(f"""
                 INSERT IGNORE INTO location_aliases (location_id, alias, alias_type, is_primary)
                 SELECT DISTINCT lm.id, TRIM(lmi.state_short_code), 'Short Code', TRUE
                 FROM location_master lm
-                JOIN Location_Master_India lmi ON LOWER(lm.name) = LOWER(lmi.state_full_name)
+                JOIN Location_Master_India lmi ON LOWER(lm.name) = LOWER(lmi.{state_col})
                 WHERE lm.location_level = 2 
                   AND lmi.state_short_code IS NOT NULL 
                   AND TRIM(lmi.state_short_code) != ''
