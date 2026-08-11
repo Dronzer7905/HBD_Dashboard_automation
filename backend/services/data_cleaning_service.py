@@ -392,6 +392,7 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                     batch_duplicates = []
                     batch_unmatched = []
                     batch_incomplete_master_ids = []
+                    batch_processed_ids = []
                     
                     for row in rows_res:
                         row_id = row[0]
@@ -558,6 +559,9 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                             batch_unmatched.append((row_id, unmatched_type, unmatched_val, row_dict))
                             continue
 
+                        # Mark as successfully processed and kept in master_table
+                        batch_processed_ids.append(row_id)
+
                         # Check if fields were updated/cleaned
                         if (b_name_clean != b_name or phone_clean != phone or sec_phone_clean != sec_phone or 
                             oth_phone_clean != oth_phone or email_clean != email or address_clean != address or 
@@ -649,10 +653,19 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                     UPDATE master_table 
                                     SET business_name=:business_name, primary_phone=:primary_phone, secondary_phone=:secondary_phone,
                                         other_phones=:other_phones, email=:email, address=:address, city=:city, state=:state,
-                                        area=:area, pincode=:pincode
+                                        area=:area, pincode=:pincode, cleaning_status='PROCESSED'
                                     WHERE id=:id
                                 """),
                                 batch_updates
+                            )
+                        
+                        # Set already-clean rows to PROCESSED
+                        clean_ids = list(set(batch_processed_ids) - set(u['id'] for u in batch_updates))
+                        if clean_ids:
+                            db.session.execute(
+                                text("UPDATE master_table SET cleaning_status='PROCESSED' WHERE id IN :ids")
+                                .bindparams(bindparam("ids", expanding=True)),
+                                {"ids": clean_ids}
                             )
                         db.session.commit()
                         
@@ -688,6 +701,7 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                     batch_duplicates = []
                     batch_unmatched = []
                     batch_incomplete_product_ids = []
+                    batch_processed_ids = []
                     
                     for row in rows_res:
                         row_id = row[0]
@@ -766,6 +780,9 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 }
                                 batch_unmatched.append((row_id, 'category', category_clean, row_dict))
                                 continue
+
+                        # Mark as successfully processed and kept in product_master
+                        batch_processed_ids.append(row_id)
 
                         # Check updates
                         if (market_clean != market or asin_clean != asin or p_name_clean != p_name or 
@@ -848,10 +865,20 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 text("""
                                     UPDATE product_master 
                                     SET marketplace_name=:marketplace_name, asin=:asin, product_name=:product_name,
-                                        brand=:brand, category_name=:category_name, sub_category_name=:sub_category_name
+                                        brand=:brand, category_name=:category_name, sub_category_name=:sub_category_name,
+                                        cleaning_status='PROCESSED'
                                     WHERE id=:id
                                 """),
                                 batch_updates
+                            )
+                        
+                        # Set already-clean rows to PROCESSED
+                        clean_ids = list(set(batch_processed_ids) - set(u['id'] for u in batch_updates))
+                        if clean_ids:
+                            db.session.execute(
+                                text("UPDATE product_master SET cleaning_status='PROCESSED' WHERE id IN :ids")
+                                .bindparams(bindparam("ids", expanding=True)),
+                                {"ids": clean_ids}
                             )
                         db.session.commit()
                         
