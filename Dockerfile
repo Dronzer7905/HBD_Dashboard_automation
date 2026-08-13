@@ -29,8 +29,10 @@ WORKDIR /app
 # Copy backend requirements and install Python dependencies
 COPY backend/requirements.txt /app/backend/
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /app/backend/requirements.txt \
-    && pip install --no-cache-dir gunicorn gevent
+    && pip install --no-cache-dir --no-compile numpy pandas \
+    && pip install --no-cache-dir --no-compile playwright cryptography lxml \
+    && pip install --no-cache-dir --no-compile -r /app/backend/requirements.txt \
+    && pip install --no-cache-dir --no-compile gunicorn gevent
 
 # Install Playwright browsers (if needed by scrapers)
 RUN playwright install --with-deps chromium
