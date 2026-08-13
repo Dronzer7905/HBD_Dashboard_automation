@@ -184,24 +184,7 @@ with app.app_context():
             else:
                 app.logger.warning(f"Database connection deferred on module import: {e}")
   
-  #Migration Logic...
-
-    try:
-        from utils.db_migrations import run_pending_migrations
-        try:
-            print("🔄 Running Database Migrations...")
-        except UnicodeEncodeError:
-            print("Running Database Migrations...")
-        run_pending_migrations(app)
-    except ImportError:
-        pass
-    finally:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-        finally:
-            db.session.remove()
+    # Database migrations moved to entrypoint.sh in production and __main__ block for local run
 
 # --- GLOBAL JWT PROTECTION ---
 PUBLIC_ROUTES = [
@@ -401,6 +384,14 @@ def health_check():
     return jsonify({"status": "ok", "message": "Backend is reachable"})
 
 if __name__ == '__main__':
+    # Run database migrations for local developer execution
+    try:
+        from utils.db_migrations import run_pending_migrations
+        print("🔄 Running Database Migrations (Local/Direct Run)...")
+        run_pending_migrations(app)
+    except Exception as e:
+        print(f"[WARNING] Local migrations check skipped: {e}")
+
     run_server_only = "--runserver" in sys.argv
     
     ingestor = None
