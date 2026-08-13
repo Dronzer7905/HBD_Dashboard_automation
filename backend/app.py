@@ -145,44 +145,7 @@ jwt.init_app(app)
 cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True) 
 mail.init_app(app)
 
-with app.app_context():
-    import time
-    db_success = False
-    db_host = os.getenv('DB_HOST', 'localhost')
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            db.session.execute(db.text('SELECT 1'))
-            try:
-                db.create_all()
-            except Exception as create_err:
-                pass
-            db_success = True
-            try:
-                print(f"✅ DATABASE CONNECTION & INITIALIZATION: SUCCESS (Connected to {db_host})")
-            except UnicodeEncodeError:
-                print(f"[SUCCESS] DATABASE CONNECTION & INITIALIZATION: Connected to {db_host}")
-            db.session.commit()
-            db.session.remove()
-            break
-        except Exception as e:
-            db.session.rollback()
-            try:
-                db.session.rollback()
-            except Exception:
-                pass
-            try:
-                db.session.remove()
-            except Exception:
-                pass
-            try:
-                print(f"⚠️ DATABASE CONNECTION ATTEMPT {attempt}/{max_retries} FAILED! Error: {e}")
-            except UnicodeEncodeError:
-                print(f"[WARNING] DATABASE CONNECTION ATTEMPT {attempt}/{max_retries} FAILED! Error: {e}")
-            if attempt < max_retries:
-                time.sleep(2)
-            else:
-                app.logger.warning(f"Database connection deferred on module import: {e}")
+# Database connection check and tables initialization moved to run_pending_migrations() / main block to prevent import-time deadlocks
   
     # Database migrations moved to entrypoint.sh in production and __main__ block for local run
 

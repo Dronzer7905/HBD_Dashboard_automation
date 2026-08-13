@@ -104,6 +104,30 @@ def run_pending_migrations(app):
     Now includes existence checks to prevent "Table doesn't exist" crashes.
     """
     with app.app_context():
+        # --- Database Connection Initialization & Verification ---
+        import time
+        db_host = os.getenv('DB_HOST', 'localhost')
+        max_retries = 3
+        
+        logger.info(f"🔄 Verifying database connection to {db_host}...")
+        for attempt in range(1, max_retries + 1):
+            try:
+                db.session.execute(text('SELECT 1'))
+                logger.info(f"✅ Database connection verified. Initializing models via db.create_all()...")
+                db.create_all()
+                db.session.commit()
+                break
+            except Exception as e:
+                db.session.rollback()
+                logger.warning(f"⚠️ Database connection attempt {attempt}/{max_retries} failed: {e}")
+                if attempt < max_retries:
+                    time.sleep(2)
+                else:
+                    logger.error("❌ Failed to connect to the database. Raising error to abort startup.")
+                    raise e
+            finally:
+                db.session.remove()
+
         # --- Pre-migration Auto-creation & Seeding ---
         ensure_dmart_sqlite_exists()
         ensure_ddl_schemas_exist(app)
