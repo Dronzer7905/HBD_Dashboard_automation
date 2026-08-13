@@ -30,10 +30,20 @@ def ensure_ddl_schemas_exist(app):
     try:
         engine = db.engine
         with engine.connect() as conn:
+            def table_exists(table_name):
+                check = text("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tname")
+                return conn.execute(check, {"tname": table_name}).scalar() > 0
+
             for sql_file in sql_files:
                 if not os.path.exists(sql_file):
                     logger.warning(f"⏩ SQL schema file not found at: {sql_file}")
                     continue
+                
+                # Check if architect_schema.sql should be skipped to prevent DDL metadata lock deadlocks
+                if os.path.basename(sql_file) == 'architect_schema.sql':
+                    if table_exists('raw_google_map_drive_data'):
+                        logger.info("⏩ Table `raw_google_map_drive_data` already exists. Skipping DDL schema `architect_schema.sql` to avoid metadata lock deadlocks during rolling updates.")
+                        continue
                     
                 logger.info(f"🔄 Executing SQL schema file: {sql_file}")
                 with open(sql_file, 'r', encoding='utf-8') as f:
