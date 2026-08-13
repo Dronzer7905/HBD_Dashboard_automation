@@ -326,8 +326,8 @@ def main():
                 # If area_name column is missing or empty, fall back to legacy columns
                 if 'area_name' in available_cols:
                     area_name_count = conn.execute(text("SELECT COUNT(*) FROM Location_Master_India WHERE area_name IS NOT NULL AND area_name != ''")).scalar() or 0
-                    if area_name_count == 0:
-                        print("Warning: 'area_name' column is empty! Falling back to legacy columns 'state', 'city', 'area'...")
+                    if area_name_count < 10000:
+                        print(f"Warning: 'area_name' column is mostly empty ({area_name_count} rows)! Falling back to legacy columns 'state', 'city', 'area'...")
                         use_legacy = True
                 else:
                     print("'area_name' column is missing. Falling back to legacy columns 'state', 'city', 'area'...")
