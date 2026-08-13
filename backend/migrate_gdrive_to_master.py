@@ -57,6 +57,8 @@ def migrate_existing_gmap_data():
                     IFNULL(created_at, NOW()) AS created_at
                 FROM g_map_master_table;
             """
+            # Commit any implicit transactions from previous SELECT checks to clear connection state
+            conn.commit()
             
             trans = conn.begin()
             try:

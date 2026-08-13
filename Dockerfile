@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build the Python Backend & Combine
-FROM python:3.10-slim
+FROM python:3.10-slim-bookworm
 
 # Install system dependencies including Nginx and Supervisor
 # Also installing dependencies for mysqlclient and playwright
