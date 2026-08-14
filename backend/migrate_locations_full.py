@@ -194,10 +194,49 @@ def main():
             print(f"🌐 Country Root Node ID: {country_id}")
 
             # -----------------------------------------------------------------
+            # DYNAMIC COLUMN DETECTION (Idempotent and safe across schema changes)
+            # -----------------------------------------------------------------
+            cols_res = conn.execute(text("SHOW COLUMNS FROM Location_Master_India")).fetchall()
+            available_cols = {r[0].lower() for r in cols_res}
+            print(f"Available columns in Location_Master_India: {', '.join(available_cols)}")
+            
+            # Detect State column
+            state_col = "state_full_name"
+            if "state_full_name" in available_cols:
+                cnt = conn.execute(text("SELECT COUNT(*) FROM Location_Master_India WHERE state_full_name IS NOT NULL AND state_full_name != ''")).scalar() or 0
+                if cnt < 1000 and "state" in available_cols:
+                    state_col = "state"
+            elif "state" in available_cols:
+                state_col = "state"
+                
+            # Detect City column
+            city_col = "city_name"
+            if "city_name" in available_cols:
+                cnt = conn.execute(text("SELECT COUNT(*) FROM Location_Master_India WHERE city_name IS NOT NULL AND city_name != ''")).scalar() or 0
+                if cnt < 1000 and "city" in available_cols:
+                    city_col = "city"
+            elif "city" in available_cols:
+                city_col = "city"
+                
+            # Detect Area column
+            area_col = "area_name"
+            if "area_name" in available_cols:
+                cnt = conn.execute(text("SELECT COUNT(*) FROM Location_Master_India WHERE area_name IS NOT NULL AND area_name != ''")).scalar() or 0
+                if cnt < 1000 and "area" in available_cols:
+                    area_col = "area"
+            elif "area" in available_cols:
+                area_col = "area"
+                
+            print(f"Using source columns for migration:")
+            print(f"  - State: `{state_col}`")
+            print(f"  - City:  `{city_col}`")
+            print(f"  - Area:  `{area_col}`\n")
+
+            # -----------------------------------------------------------------
             # PHASE 1: Migrate Unique States (Standardized & Aliased)
             # -----------------------------------------------------------------
             print("\n🔄 Phase 1: Migrating unique states...")
-            raw_states = conn.execute(text("SELECT DISTINCT BINARY state_full_name AS sname FROM Location_Master_India WHERE state_full_name IS NOT NULL AND state_full_name != ''")).fetchall()
+            raw_states = conn.execute(text(f"SELECT DISTINCT `{state_col}` AS sname FROM Location_Master_India WHERE `{state_col}` IS NOT NULL AND `{state_col}` != ''")).fetchall()
             state_aliases_to_insert = []
             
             for r in raw_states:
@@ -276,10 +315,10 @@ def main():
             except Exception as e:
                 print(f"⚠️ Warning: Could not read Top_cities_rank table. City ranks will not be populated: {e}")
 
-            raw_cities = conn.execute(text("""
-                SELECT DISTINCT BINARY state_full_name AS sname, BINARY city_name AS cname 
+            raw_cities = conn.execute(text(f"""
+                SELECT DISTINCT `{state_col}` AS sname, `{city_col}` AS cname 
                 FROM Location_Master_India 
-                WHERE state_full_name IS NOT NULL AND city_name IS NOT NULL AND city_name != ''
+                WHERE `{state_col}` IS NOT NULL AND `{city_col}` IS NOT NULL AND `{city_col}` != ''
             """)).fetchall()
             
             cities_to_insert = []
@@ -326,57 +365,22 @@ def main():
             # -----------------------------------------------------------------
             print("\n🔄 Phase 3: Migrating unique areas and postal codes...")
             
-            # Detect available columns in Location_Master_India dynamically to ensure compatibility
-            cols_res = conn.execute(text("SHOW COLUMNS FROM Location_Master_India")).fetchall()
-            available_cols = {r[0].lower() for r in cols_res}
-            print(f"Detected columns in Location_Master_India: {', '.join(available_cols)}")
-            
-            use_legacy = False
-            if 'area' in available_cols and 'city' in available_cols and 'state' in available_cols:
-                # If area_name column is missing or empty, fall back to legacy columns
-                if 'area_name' in available_cols:
-                    area_name_count = conn.execute(text("SELECT COUNT(*) FROM Location_Master_India WHERE area_name IS NOT NULL AND area_name != ''")).scalar() or 0
-                    if area_name_count < 10000:
-                        print(f"Warning: 'area_name' column is mostly empty ({area_name_count} rows)! Falling back to legacy columns 'state', 'city', 'area'...")
-                        use_legacy = True
-                else:
-                    print("'area_name' column is missing. Falling back to legacy columns 'state', 'city', 'area'...")
-                    use_legacy = True
-            
-            if use_legacy:
-                print("Running unique areas extraction using legacy columns (state, city, area)...")
-                raw_areas_q = """
-                    SELECT DISTINCT 
-                        l.state AS sname, 
-                        l.city AS cname, 
-                        l.area AS aname,
-                        m.pincode AS pincode
-                    FROM Location_Master_India l
-                    LEFT JOIN (
-                        SELECT city, area, MAX(pincode) as pincode
-                        FROM master_table
-                        WHERE pincode IS NOT NULL AND pincode != ''
-                        GROUP BY city, area
-                    ) m ON l.city = m.city AND l.area = m.area
-                    WHERE l.state IS NOT NULL AND l.city IS NOT NULL AND l.area IS NOT NULL AND l.area != ''
-                """
-            else:
-                print("Running unique areas extraction using active columns (state_full_name, city_name, area_name)...")
-                raw_areas_q = """
-                    SELECT DISTINCT 
-                        l.state_full_name AS sname, 
-                        l.city_name AS cname, 
-                        l.area_name AS aname,
-                        m.pincode AS pincode
-                    FROM Location_Master_India l
-                    LEFT JOIN (
-                        SELECT city, area, MAX(pincode) as pincode
-                        FROM master_table
-                        WHERE pincode IS NOT NULL AND pincode != ''
-                        GROUP BY city, area
-                    ) m ON l.city_name = m.city AND l.area_name = m.area
-                    WHERE l.state_full_name IS NOT NULL AND l.city_name IS NOT NULL AND l.area_name IS NOT NULL AND l.area_name != ''
-                """
+            print(f"Running unique areas extraction using source columns ({state_col}, {city_col}, {area_col})...")
+            raw_areas_q = f"""
+                SELECT DISTINCT 
+                    l.`{state_col}` AS sname, 
+                    l.`{city_col}` AS cname, 
+                    l.`{area_col}` AS aname,
+                    m.pincode AS pincode
+                FROM Location_Master_India l
+                LEFT JOIN (
+                    SELECT city, area, MAX(pincode) as pincode
+                    FROM master_table
+                    WHERE pincode IS NOT NULL AND pincode != ''
+                    GROUP BY city, area
+                ) m ON l.`{city_col}` = m.city AND l.`{area_col}` = m.area
+                WHERE l.`{state_col}` IS NOT NULL AND l.`{city_col}` IS NOT NULL AND l.`{area_col}` IS NOT NULL AND l.`{area_col}` != ''
+            """
                 
             raw_areas = conn.execute(text(raw_areas_q)).fetchall()
             
@@ -446,14 +450,11 @@ def main():
             # -----------------------------------------------------------------
             print("\n🔄 Phase 4: Populating location_aliases with state short codes...")
             
-            # Use appropriate state column based on legacy fallback detection in Phase 3
-            state_col = "state" if use_legacy else "state_full_name"
-            
             alias_sql = text(f"""
                 INSERT IGNORE INTO location_aliases (location_id, alias, alias_type, is_primary)
                 SELECT DISTINCT lm.id, TRIM(lmi.state_short_code), 'Short Code', TRUE
                 FROM location_master lm
-                JOIN Location_Master_India lmi ON LOWER(lm.name) = LOWER(lmi.{state_col})
+                JOIN Location_Master_India lmi ON LOWER(lm.name) = LOWER(lmi.`{state_col}`)
                 WHERE lm.location_level = 2 
                   AND lmi.state_short_code IS NOT NULL 
                   AND TRIM(lmi.state_short_code) != ''
