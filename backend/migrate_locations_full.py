@@ -209,24 +209,34 @@ def main():
                 skey = standard_name.lower()
                 
                 if skey not in state_cache:
-                    node_uuid = str(uuid.uuid4())
-                    slug = create_slug(standard_name)
-                    try:
-                        conn.execute(text("""
-                            INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
-                            VALUES (:uuid, :pid, 2, 'State', :name, :slug)
-                        """), {"uuid": node_uuid, "pid": country_id, "name": standard_name, "slug": slug})
-                        conn.commit()
-                        state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
-                    except Exception:
-                        # Append unique slug suffix in case of collision
-                        slug = f"{slug}-{node_uuid[:8]}"
-                        conn.execute(text("""
-                            INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
-                            VALUES (:uuid, :pid, 2, 'State', :name, :slug)
-                        """), {"uuid": node_uuid, "pid": country_id, "name": standard_name, "slug": slug})
-                        conn.commit()
-                        state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+                    # Check if this state name already exists in the database (case-insensitive) to prevent duplication
+                    existing_id = conn.execute(text("""
+                        SELECT id FROM location_master 
+                        WHERE location_level = 2 AND LOWER(name) = LOWER(:name)
+                    """), {"name": standard_name}).scalar()
+                    
+                    if existing_id:
+                        state_id = existing_id
+                        print(f"  - State '{standard_name}' already exists in database (ID: {state_id}). Reusing ID.")
+                    else:
+                        node_uuid = str(uuid.uuid4())
+                        slug = create_slug(standard_name)
+                        try:
+                            conn.execute(text("""
+                                INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
+                                VALUES (:uuid, :pid, 2, 'State', :name, :slug)
+                            """), {"uuid": node_uuid, "pid": country_id, "name": standard_name, "slug": slug})
+                            conn.commit()
+                            state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+                        except Exception:
+                            # Append unique slug suffix in case of collision with a different standard name
+                            slug = f"{slug}-{node_uuid[:8]}"
+                            conn.execute(text("""
+                                INSERT INTO location_master (uuid, parent_id, location_level, location_type, name, slug)
+                                VALUES (:uuid, :pid, 2, 'State', :name, :slug)
+                            """), {"uuid": node_uuid, "pid": country_id, "name": standard_name, "slug": slug})
+                            conn.commit()
+                            state_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
                     
                     state_cache[skey] = state_id
                 
