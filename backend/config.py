@@ -16,22 +16,36 @@ class Config:
     DB_PORT = os.getenv('DB_PORT', '3306')
     DB_NAME = os.getenv('DB_NAME')
 
-    SQLALCHEMY_DATABASE_URI = (
-        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
-
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_size": 20,
-        "max_overflow": 10,
-        "pool_recycle": 280,
-        "pool_pre_ping": True, # Checks if DB is alive before the query
-        "connect_args": {
-            "connect_timeout": 60,
-            "read_timeout": 300,
-            "write_timeout": 300,
-            "ssl": {"ssl_disabled": True}
+    # Determine connection string based on the port (5433 = PostgreSQL)
+    if str(DB_PORT) == '5433':
+        SQLALCHEMY_DATABASE_URI = (
+            f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        )
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            "pool_size": 20,
+            "max_overflow": 10,
+            "pool_recycle": 280,
+            "pool_pre_ping": True,
+            "connect_args": {
+                "connect_timeout": 60
+            }
         }
-    }
+    else:
+        SQLALCHEMY_DATABASE_URI = (
+            f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        )
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            "pool_size": 20,
+            "max_overflow": 10,
+            "pool_recycle": 280,
+            "pool_pre_ping": True,
+            "connect_args": {
+                "connect_timeout": 60,
+                "read_timeout": 300,
+                "write_timeout": 300,
+                "ssl": {"ssl_disabled": True}
+            }
+        }
 
     
     SQLALCHEMY_TRACK_MODIFICATIONS = False

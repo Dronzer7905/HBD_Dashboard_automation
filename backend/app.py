@@ -141,6 +141,104 @@ app.config.from_object(Config)
 # Init extensions
 db.init_app(app)
 migrate.init_app(app, db)
+
+# Register global SQLAlchemy query translation event listener for PostgreSQL compatibility
+from sqlalchemy import event
+with app.app_context():
+    @event.listens_for(db.engine, "before_cursor_execute", retval=True)
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        dialect = db.engine.dialect.name
+        if dialect == 'postgresql':
+            # Translate MySQL backticks to double quotes for PG compatibility
+            statement = statement.replace("`", '"')
+            
+            # Replace MySQL specific date/time intervals
+            statement = statement.replace("INTERVAL 7 DAY", "INTERVAL '7 days'")
+            statement = statement.replace("INTERVAL 30 DAY", "INTERVAL '30 days'")
+            
+            # Translate MySQL SHOW TABLES queries to PG catalog queries
+            import re
+            if "SHOW TABLES LIKE" in statement:
+                match = re.search(r"SHOW TABLES LIKE '([^']+)'", statement)
+                if match:
+                    tbl = match.group(1)
+                    statement = f"SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = '{tbl}'"
+            elif "SHOW TABLES" in statement:
+                statement = "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                
+            # Translate MySQL DESCRIBE table to PG information_schema queries
+            if "DESCRIBE" in statement:
+                match = re.search(r'DESCRIBE\s+"?(\w+)"?', statement, re.IGNORECASE)
+                if match:
+                    tbl = match.group(1)
+                    statement = f"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{tbl}'"
+            
+            # Translate MySQL SHOW COLUMNS FROM table to PG information_schema queries
+            if "SHOW COLUMNS FROM" in statement:
+                match = re.search(r'SHOW COLUMNS FROM\s+"?(\w+)"?', statement, re.IGNORECASE)
+                if match:
+                    tbl = match.group(1)
+                    statement = f"SELECT column_name AS Field FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{tbl}'"
+            
+            # Quote capitalized tables to preserve case-sensitivity (with self-healing to prevent double double-quoting)
+            statement = statement.replace('""Location_Master_India""', '"Location_Master_India"')
+            if "Location_Master_India" in statement and '"Location_Master_India"' not in statement:
+                statement = statement.replace("Location_Master_India", '"Location_Master_India"')
+            
+            # Translate MySQL INSERT IGNORE to PG ON CONFLICT DO NOTHING
+            if "INSERT IGNORE INTO" in statement or "insert ignore into" in statement:
+                # Replace INSERT IGNORE with INSERT INTO
+                statement = re.sub(r"(?i)INSERT IGNORE INTO", "INSERT INTO", statement)
+                # Append ON CONFLICT DO NOTHING if not present
+                if "ON CONFLICT" not in statement:
+                    statement += " ON CONFLICT DO NOTHING"
+            
+            # Safely bypass MySQL-specific foreign key checks
+            if "FOREIGN_KEY_CHECKS" in statement:
+                statement = "SELECT 1"
+                
+            # Translate MySQL UPDATE INNER JOIN queries to PostgreSQL UPDATE FROM syntax
+            if "UPDATE unmatched_data_review" in statement or 'UPDATE "unmatched_data_review"' in statement:
+                if "INNER JOIN master_table" in statement or 'INNER JOIN "master_table"' in statement:
+                    statement = """
+                        UPDATE unmatched_data_review u
+                        SET correction_status = 'corrected'
+                        FROM master_table m
+                        WHERE u.row_id = m.id
+                          AND u.correction_status = 'pending'
+                          AND u.table_name = 'master_table'
+                          AND u.row_id IS NOT NULL
+                    """
+                elif "INNER JOIN product_master" in statement or 'INNER JOIN "product_master"' in statement:
+                    statement = """
+                        UPDATE unmatched_data_review u
+                        SET correction_status = 'corrected'
+                        FROM product_master p
+                        WHERE u.row_id = p.id
+                          AND u.correction_status = 'pending'
+                          AND u.table_name = 'product_master'
+                          AND u.row_id IS NOT NULL
+                    """
+            
+            # Replace HAVING aggregation aliases with standard aggregate filters
+            statement = statement.replace("HAVING cnt > 1", "HAVING COUNT(*) > 1")
+            
+            # Type-agnostic comparisons for active/availability flags to prevent boolean/integer mismatches
+            statement = statement.replace("is_active = 1", "is_active::text IN ('1', 'true')")
+            statement = statement.replace("is_active = 0", "is_active::text IN ('0', 'false')")
+            statement = statement.replace("is_active = '1'", "is_active::text IN ('1', 'true')")
+            statement = statement.replace("is_active = '0'", "is_active::text IN ('0', 'false')")
+            
+            statement = statement.replace("availability = 1", "availability::text IN ('1', 'true')")
+            statement = statement.replace("availability = 0", "availability::text IN ('0', 'false')")
+            statement = statement.replace("availability = '1'", "availability::text IN ('1', 'true')")
+            statement = statement.replace("availability = '0'", "availability::text IN ('0', 'false')")
+            
+            # Remove MySQL-specific collation directives completely (including unicode and general)
+            statement = re.sub(r'COLLATE\s+\w+', '', statement, flags=re.IGNORECASE)
+            
+        return statement, parameters
+
 jwt.init_app(app)
 cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True) 
 mail.init_app(app)

@@ -11,42 +11,47 @@ def main():
         
         print("Updating Tier 1...")
         db.execute(text("""
-            UPDATE item_data i
-            INNER JOIN tier1_master_clean t
-                ON t.raw_source_id = i.ID AND t.raw_source_table = 'item_data'
-            SET i.assigned_tier = 'tier1_master_clean', i.cleaning_status = 'PROCESSED'
+            UPDATE item_data 
+            SET assigned_tier = 'tier1_master_clean', cleaning_status = 'PROCESSED'
+            WHERE ID IN (
+                SELECT raw_source_id FROM tier1_master_clean WHERE raw_source_table = 'item_data'
+            )
         """))
         
         print("Updating Tier 2...")
         db.execute(text("""
-            UPDATE item_data i
-            INNER JOIN tier2_missing_contact t
-                ON t.raw_source_id = i.ID AND t.raw_source_table = 'item_data'
-            SET i.assigned_tier = 'tier2_missing_contact', i.cleaning_status = 'PROCESSED'
+            UPDATE item_data 
+            SET assigned_tier = 'tier2_missing_contact', cleaning_status = 'PROCESSED'
+            WHERE ID IN (
+                SELECT raw_source_id FROM tier2_missing_contact WHERE raw_source_table = 'item_data'
+            )
         """))
         
         print("Updating Tier 3...")
         db.execute(text("""
-            UPDATE item_data i
-            INNER JOIN tier3_missing_location t
-                ON t.raw_source_id = i.ID AND t.raw_source_table = 'item_data'
-            SET i.assigned_tier = 'tier3_missing_location', i.cleaning_status = 'PROCESSED'
+            UPDATE item_data 
+            SET assigned_tier = 'tier3_missing_location', cleaning_status = 'PROCESSED'
+            WHERE ID IN (
+                SELECT raw_source_id FROM tier3_missing_location WHERE raw_source_table = 'item_data'
+            )
         """))
         
         print("Updating Tier 4...")
         db.execute(text("""
-            UPDATE item_data i
-            INNER JOIN tier4_partial_fragments t
-                ON t.raw_source_id = i.ID AND t.raw_source_table = 'item_data'
-            SET i.assigned_tier = 'tier4_partial_fragments', i.cleaning_status = 'PROCESSED'
+            UPDATE item_data 
+            SET assigned_tier = 'tier4_partial_fragments', cleaning_status = 'PROCESSED'
+            WHERE ID IN (
+                SELECT raw_source_id FROM tier4_partial_fragments WHERE raw_source_table = 'item_data'
+            )
         """))
         
         print("Updating Tier 5...")
         db.execute(text("""
-            UPDATE item_data i
-            INNER JOIN tier5_linked_duplicates t
-                ON t.raw_source_id = i.ID AND t.raw_source_table = 'item_data'
-            SET i.assigned_tier = 'tier5_linked_duplicates', i.cleaning_status = 'PROCESSED'
+            UPDATE item_data 
+            SET assigned_tier = 'tier5_linked_duplicates', cleaning_status = 'PROCESSED'
+            WHERE ID IN (
+                SELECT raw_source_id FROM tier5_linked_duplicates WHERE raw_source_table = 'item_data'
+            )
         """))
         
         db.commit()

@@ -4,11 +4,29 @@ import json
 import logging
 import threading
 from datetime import datetime
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, text as sqlalchemy_text
 from extensions import db
 from model.data_cleaning_log import DataCleaningLog
 from model.duplicate_records_review import DuplicateRecordsReview
 from model.unmatched_data_review import UnmatchedDataReview
+
+def text(sql_str):
+    dialect = db.engine.dialect.name
+    if dialect == 'postgresql':
+        if "FOREIGN_KEY_CHECKS" in sql_str:
+            return sqlalchemy_text("SELECT 1")
+        # Replace REGEXP operator with PostgreSQL ~ operator
+        sql_str = sql_str.replace(" REGEXP ", " ~ ")
+        # Quote capitalized Location_Master_India table to preserve casing in PG
+        sql_str = sql_str.replace("Location_Master_India", '"Location_Master_India"')
+        # Replace HAVING cnt > 1 alias with aggregate check for PostgreSQL compatibility
+        sql_str = sql_str.replace("HAVING cnt > 1", "HAVING COUNT(*) > 1")
+        # Remove MySQL-specific collations
+        sql_str = sql_str.replace(" COLLATE utf8mb4_general_ci", "")
+        # Translate CREATE TABLE x LIKE y to PG syntax
+        import re
+        sql_str = re.sub(r"CREATE TABLE (\w+) LIKE (\w+)", r"CREATE TABLE \1 (LIKE \2 INCLUDING ALL)", sql_str)
+    return sqlalchemy_text(sql_str)
 
 logger = logging.getLogger("DataCleaningService")
 
@@ -302,6 +320,12 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
             states_set, cities_set, areas_by_city, state_map, city_map, area_map = load_location_master()
             categories_set, cat_map = load_product_category_master()
             
+            # Build fast O(1) reverse lookup map for area to city matching
+            area_to_city = {}
+            for c_lower, a_set in areas_by_city.items():
+                for a_lower in a_set:
+                    area_to_city[a_lower] = c_lower
+            
             # Suffix for backup tables
             date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_table_master = f"master_table_backup_{date_str}"
@@ -510,11 +534,10 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                         break
                             if not city_clean and area_clean:
                                 area_lower = area_clean.lower()
-                                for c_lower, a_set in areas_by_city.items():
-                                    if area_lower in a_set:
-                                        city_clean = city_map.get(c_lower)
-                                        cleaned_count += 1
-                                        break
+                                if area_lower in area_to_city:
+                                    c_lower = area_to_city[area_lower]
+                                    city_clean = city_map.get(c_lower)
+                                    cleaned_count += 1
 
                         # City matching & verification
                         if city_clean and not is_loc_unmatched:
@@ -648,16 +671,63 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
 
                         # 4. Bulk updates
                         if batch_updates:
-                            db.session.execute(
-                                text("""
-                                    UPDATE master_table 
-                                    SET business_name=:business_name, primary_phone=:primary_phone, secondary_phone=:secondary_phone,
-                                        other_phones=:other_phones, email=:email, address=:address, city=:city, state=:state,
-                                        area=:area, pincode=:pincode, cleaning_status='PROCESSED'
-                                    WHERE id=:id
-                                """),
-                                batch_updates
-                            )
+                            dialect = db.engine.dialect.name
+                            if dialect == 'postgresql':
+                                raw_conn = db.session.connection().connection
+                                with raw_conn.cursor() as raw_cur:
+                                    raw_cur.execute("""
+                                        CREATE TEMPORARY TABLE IF NOT EXISTS temp_master_updates (
+                                            id bigint,
+                                            business_name varchar(1024),
+                                            primary_phone varchar(100),
+                                            secondary_phone varchar(100),
+                                            other_phones varchar(500),
+                                            email varchar(255),
+                                            address text,
+                                            city varchar(100),
+                                            state varchar(100),
+                                            area varchar(100),
+                                            pincode varchar(20)
+                                        ) ON COMMIT DROP;
+                                    """)
+                                    from psycopg2.extras import execute_values
+                                    update_tuples = [(
+                                        u["id"], u["business_name"], u["primary_phone"], u["secondary_phone"],
+                                        u["other_phones"], u["email"], u["address"], u["city"], u["state"],
+                                        u["area"], u["pincode"]
+                                    ) for u in batch_updates]
+                                    execute_values(
+                                        raw_cur,
+                                        "INSERT INTO temp_master_updates VALUES %s",
+                                        update_tuples
+                                    )
+                                    raw_cur.execute("""
+                                        UPDATE master_table m
+                                        SET business_name = t.business_name,
+                                            primary_phone = t.primary_phone,
+                                            secondary_phone = t.secondary_phone,
+                                            other_phones = t.other_phones,
+                                            email = t.email,
+                                            address = t.address,
+                                            city = t.city,
+                                            state = t.state,
+                                            area = t.area,
+                                            pincode = t.pincode,
+                                            cleaning_status = 'PROCESSED'
+                                        FROM temp_master_updates t
+                                        WHERE m.id = t.id;
+                                    """)
+                            else:
+                                db.session.execute(
+                                    text("""
+                                        UPDATE master_table 
+                                        SET business_name=:business_name, primary_phone=:primary_phone, secondary_phone=:secondary_phone,
+                                            other_phones=:other_phones, email=:email, address=:address, city=:city, state=:state,
+                                            area=:area, pincode=:pincode, cleaning_status='PROCESSED'
+                                        WHERE id=:id
+                                    """),
+                                    batch_updates
+                                )
                         
                         # Set already-clean rows to PROCESSED
                         clean_ids = list(set(batch_processed_ids) - set(u['id'] for u in batch_updates))
@@ -668,7 +738,84 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 {"ids": clean_ids}
                             )
                         db.session.commit()
-                        
+
+                        # Unify clean records in tier1_master_clean
+                        if batch_processed_ids:
+                            # 1. Fetch final standardized data
+                            clean_rows = db.session.execute(
+                                text("""
+                                    SELECT id, business_name, primary_phone, email, address, city, state, pincode, quality_score
+                                    FROM master_table
+                                    WHERE id IN :ids
+                                """).bindparams(bindparam("ids", expanding=True)),
+                                {"ids": batch_processed_ids}
+                            ).fetchall()
+                            
+                            # 2. Delete existing entries in tier1 to prevent duplicates
+                            db.session.execute(
+                                text("""
+                                    DELETE FROM tier1_master_clean 
+                                    WHERE raw_source_table = 'master_table' 
+                                    AND raw_source_id IN :ids
+                                """).bindparams(bindparam("ids", expanding=True)),
+                                {"ids": batch_processed_ids}
+                            )
+                            
+                            # 3. Bulk insert clean records
+                            dialect = db.engine.dialect.name
+                            if dialect == 'postgresql':
+                                raw_conn = db.session.connection().connection
+                                with raw_conn.cursor() as raw_cur:
+                                    from psycopg2.extras import execute_values
+                                    tier1_tuples = [(
+                                        "master_table",
+                                        r[0],
+                                        r[1],
+                                        r[2],
+                                        r[3],
+                                        r[4],
+                                        r[5],
+                                        r[6],
+                                        r[7],
+                                        r[8] if r[8] is not None else 100,
+                                        "{}"
+                                    ) for r in clean_rows]
+                                    execute_values(
+                                        raw_cur,
+                                        """
+                                        INSERT INTO tier1_master_clean 
+                                            (raw_source_table, raw_source_id, business_name, primary_phone, email, address, city, state, pincode, quality_score, inferred_fields)
+                                        VALUES %s
+                                        """,
+                                        tier1_tuples
+                                    )
+                            else:
+                                tier1_inserts = []
+                                for r in clean_rows:
+                                    tier1_inserts.append({
+                                        "raw_source_table": "master_table",
+                                        "raw_source_id": r[0],
+                                        "business_name": r[1],
+                                        "primary_phone": r[2],
+                                        "email": r[3],
+                                        "address": r[4],
+                                        "city": r[5],
+                                        "state": r[6],
+                                        "pincode": r[7],
+                                        "quality_score": r[8] if r[8] is not None else 100,
+                                        "inferred_fields": "{}"
+                                    })
+                                db.session.execute(
+                                    text("""
+                                        INSERT INTO tier1_master_clean 
+                                            (raw_source_table, raw_source_id, business_name, primary_phone, email, address, city, state, pincode, quality_score, inferred_fields)
+                                        VALUES 
+                                            (:raw_source_table, :raw_source_id, :business_name, :primary_phone, :email, :address, :city, :state, :pincode, :quality_score, :inferred_fields)
+                                    """),
+                                    tier1_inserts
+                                )
+                            db.session.commit()
+                            
             # 4. Clean product_master
             if table_name in ('product_master', 'all'):
                 logger.info("Cleaning product_master...")
@@ -861,16 +1008,54 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
 
                         # 4. Bulk updates
                         if batch_updates:
-                            db.session.execute(
-                                text("""
-                                    UPDATE product_master 
-                                    SET marketplace_name=:marketplace_name, asin=:asin, product_name=:product_name,
-                                        brand=:brand, category_name=:category_name, sub_category_name=:sub_category_name,
-                                        cleaning_status='PROCESSED'
-                                    WHERE id=:id
-                                """),
-                                batch_updates
-                            )
+                            dialect = db.engine.dialect.name
+                            if dialect == 'postgresql':
+                                raw_conn = db.session.connection().connection
+                                with raw_conn.cursor() as raw_cur:
+                                    raw_cur.execute("""
+                                        CREATE TEMPORARY TABLE IF NOT EXISTS temp_product_updates (
+                                            id bigint,
+                                            marketplace_name varchar(255),
+                                            asin varchar(50),
+                                            product_name varchar(255),
+                                            brand varchar(255),
+                                            category_name varchar(255),
+                                            sub_category_name varchar(255)
+                                        ) ON COMMIT DROP;
+                                    """)
+                                    from psycopg2.extras import execute_values
+                                    update_tuples = [(
+                                        u["id"], u["marketplace_name"], u["asin"], u["product_name"],
+                                        u["brand"], u["category_name"], u["sub_category_name"]
+                                    ) for u in batch_updates]
+                                    execute_values(
+                                        raw_cur,
+                                        "INSERT INTO temp_product_updates VALUES %s",
+                                        update_tuples
+                                    )
+                                    raw_cur.execute("""
+                                        UPDATE product_master p
+                                        SET marketplace_name = t.marketplace_name,
+                                            asin = t.asin,
+                                            product_name = t.product_name,
+                                            brand = t.brand,
+                                            category_name = t.category_name,
+                                            sub_category_name = t.sub_category_name,
+                                            cleaning_status = 'PROCESSED'
+                                        FROM temp_product_updates t
+                                        WHERE p.id = t.id;
+                                    """)
+                            else:
+                                db.session.execute(
+                                    text("""
+                                        UPDATE product_master 
+                                        SET marketplace_name=:marketplace_name, asin=:asin, product_name=:product_name,
+                                            brand=:brand, category_name=:category_name, sub_category_name=:sub_category_name,
+                                            cleaning_status='PROCESSED'
+                                        WHERE id=:id
+                                    """),
+                                    batch_updates
+                                )
                         
                         # Set already-clean rows to PROCESSED
                         clean_ids = list(set(batch_processed_ids) - set(u['id'] for u in batch_updates))
@@ -919,28 +1104,51 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
             if run_type == 'apply':
                 logger.info(f"Starting automatic rollback for run_id={run_id} due to failure...")
                 try:
-                    db.session.execute(text("SET FOREIGN_KEY_CHECKS=0"))
-                    if table_name in ('master_table', 'all') and backup_table_master:
-                        if backup_master_completed:
-                            logger.info(f"Performing atomic rename rollback for master_table from {backup_table_master}...")
-                            db.session.execute(text("DROP TABLE IF EXISTS master_table_failed"))
-                            # Atomically swap tables in less than 1 millisecond
-                            db.session.execute(text(f"RENAME TABLE master_table TO master_table_failed, {backup_table_master} TO master_table"))
-                            db.session.execute(text("DROP TABLE IF EXISTS master_table_failed"))
-                            logger.info("Automatic rollback master_table: SUCCESS")
-                        else:
-                            logger.warning(f"Skipping auto-rollback for master_table: backup did not complete successfully or was interrupted.")
-                            
-                    if table_name in ('product_master', 'all') and backup_table_product:
-                        if backup_product_completed:
-                            logger.info(f"Performing atomic rename rollback for product_master from {backup_table_product}...")
-                            db.session.execute(text("DROP TABLE IF EXISTS product_master_failed"))
-                            # Atomically swap tables in less than 1 millisecond
-                            db.session.execute(text(f"RENAME TABLE product_master TO product_master_failed, {backup_table_product} TO product_master"))
-                            db.session.execute(text("DROP TABLE IF EXISTS product_master_failed"))
-                            logger.info("Automatic rollback product_master: SUCCESS")
-                        else:
-                            logger.warning(f"Skipping auto-rollback for product_master: backup did not complete successfully or was interrupted.")
+                    dialect = db.engine.dialect.name
+                    if dialect == 'postgresql':
+                        if table_name in ('master_table', 'all') and backup_table_master:
+                            if backup_master_completed:
+                                logger.info(f"Performing atomic rename rollback for master_table from {backup_table_master}...")
+                                db.session.execute(text("DROP TABLE IF EXISTS master_table_failed CASCADE"))
+                                db.session.execute(text("ALTER TABLE master_table RENAME TO master_table_failed"))
+                                db.session.execute(text(f"ALTER TABLE {backup_table_master} RENAME TO master_table"))
+                                db.session.execute(text("DROP TABLE IF EXISTS master_table_failed CASCADE"))
+                                logger.info("Automatic rollback master_table: SUCCESS")
+                            else:
+                                logger.warning(f"Skipping auto-rollback for master_table: backup did not complete successfully or was interrupted.")
+                                
+                        if table_name in ('product_master', 'all') and backup_table_product:
+                            if backup_product_completed:
+                                logger.info(f"Performing atomic rename rollback for product_master from {backup_table_product}...")
+                                db.session.execute(text("DROP TABLE IF EXISTS product_master_failed CASCADE"))
+                                db.session.execute(text("ALTER TABLE product_master RENAME TO product_master_failed"))
+                                db.session.execute(text(f"ALTER TABLE {backup_table_product} RENAME TO product_master"))
+                                db.session.execute(text("DROP TABLE IF EXISTS product_master_failed CASCADE"))
+                                logger.info("Automatic rollback product_master: SUCCESS")
+                            else:
+                                logger.warning(f"Skipping auto-rollback for product_master: backup did not complete successfully or was interrupted.")
+                    else:
+                        db.session.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+                        if table_name in ('master_table', 'all') and backup_table_master:
+                            if backup_master_completed:
+                                logger.info(f"Performing atomic rename rollback for master_table from {backup_table_master}...")
+                                db.session.execute(text("DROP TABLE IF EXISTS master_table_failed"))
+                                db.session.execute(text(f"RENAME TABLE master_table TO master_table_failed, {backup_table_master} TO master_table"))
+                                db.session.execute(text("DROP TABLE IF EXISTS master_table_failed"))
+                                logger.info("Automatic rollback master_table: SUCCESS")
+                            else:
+                                logger.warning(f"Skipping auto-rollback for master_table: backup did not complete successfully or was interrupted.")
+                                
+                        if table_name in ('product_master', 'all') and backup_table_product:
+                            if backup_product_completed:
+                                logger.info(f"Performing atomic rename rollback for product_master from {backup_table_product}...")
+                                db.session.execute(text("DROP TABLE IF EXISTS product_master_failed"))
+                                db.session.execute(text(f"RENAME TABLE product_master TO product_master_failed, {backup_table_product} TO product_master"))
+                                db.session.execute(text("DROP TABLE IF EXISTS product_master_failed"))
+                                logger.info("Automatic rollback product_master: SUCCESS")
+                            else:
+                                logger.warning(f"Skipping auto-rollback for product_master: backup did not complete successfully or was interrupted.")
+                        db.session.execute(text("SET FOREIGN_KEY_CHECKS=1"))
                             
                     reconcile_review_records_present_in_active_tables()
                     db.session.commit()

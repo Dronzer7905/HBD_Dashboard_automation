@@ -32,6 +32,7 @@ import requests
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import worker_ready, setup_logging
 # ... (rest of imports)
 
@@ -141,6 +142,18 @@ celery.conf.beat_schedule = {
         'task': 'tasks.refresh_locations.sync_new_locations',
         'schedule': 86400.0,
     },
+    'auto-clean-master-twice-weekly': {
+        'task': 'tasks.auto_clean_pipeline.auto_clean_master_table',
+        'schedule': crontab(minute=0, hour=1, day_of_week='0,4'), # Sundays and Thursdays at 1:00 AM
+    },
+    'auto-clean-product-twice-weekly': {
+        'task': 'tasks.auto_clean_pipeline.auto_clean_product_master',
+        'schedule': crontab(minute=0, hour=2, day_of_week='0,4'), # Sundays and Thursdays at 2:00 AM
+    },
+    'auto-route-tiers-twice-weekly': {
+        'task': 'tasks.auto_clean_pipeline.auto_route_item_tiers',
+        'schedule': crontab(minute=0, hour=3, day_of_week='0,4'), # Sundays and Thursdays at 3:00 AM
+    },
 }
 
 celery.autodiscover_tasks(["tasks"])
@@ -171,6 +184,7 @@ import tasks.gdrive_task.etl_tasks
 import tasks.deep_scraper_task
 import tasks.refresh_top_cities
 import tasks.refresh_locations
+import tasks.auto_clean_pipeline
 # # SECTION 8: Prometheus Metrics Server (starts with worker)
 # @worker_ready.connect
 # def start_metrics_on_worker_ready(**kwargs):

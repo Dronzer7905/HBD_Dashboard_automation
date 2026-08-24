@@ -54,16 +54,21 @@ start "HBD Dashboard - Celery Worker" powershell -NoExit -ExecutionPolicy Bypass
 echo %GREEN%[4/4] Starting GDrive Scanner...%RESET%
 start "HBD Dashboard - GDrive Scanner" cmd /k "cd /d "%~dp0backend" && title HBD Dashboard - GDrive Scanner && echo Activating virtual environment... && call "%~dp0venv\Scripts\activate.bat" && echo Starting GDrive Scanner... && python worker_etl.py"
 
+echo %GREEN%[5/5] Starting SSH Tunnel to remote PostgreSQL DB...%RESET%
+start "HBD Dashboard - DB SSH Tunnel" cmd /k "title HBD Dashboard - DB SSH Tunnel && echo Starting SSH Tunnel... && ssh -o ServerAliveInterval=60 -L 5433:127.0.0.1:5433 dbguest@152.53.94.20"
+
 echo.
 echo %BOLD%%MAGENTA%=====================================================================%RESET%
-echo %BOLD%%GREEN%  SUCCESS: All 4 services are starting in separate windows!%RESET%
+echo %BOLD%%GREEN%  SUCCESS: All 5 services are starting in separate windows!%RESET%
 echo %BOLD%%MAGENTA%=====================================================================%RESET%
 echo   1. Frontend Dev Server  - http://localhost:5173
 echo   2. Backend Flask API    - http://localhost:8001
 echo   3. Celery Worker        - Processing CSV tasks in the background
 echo   4. GDrive Scanner       - Monitoring Google Drive changes
+echo   5. DB SSH Tunnel        - Tunneling PostgreSQL database connection on port 5433
 echo.
 echo %YELLOW%  Tip: Keep these windows open while working.%RESET%
+echo %YELLOW%       Type the password in the SSH Tunnel window when prompted.%RESET%
 echo %YELLOW%       To stop a service, simply close its window or press Ctrl+C in it.%RESET%
 echo.
 pause

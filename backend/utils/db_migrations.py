@@ -154,6 +154,177 @@ def run_pending_migrations(app):
                     check = text("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tname")
                     return conn.execute(check, {"tname": table_name}).scalar() > 0
 
+                # === Rank Analytics Tables Auto-Creation & Seeding ===
+                # 1. Top_categories_rank Table
+                if not table_exists('Top_categories_rank'):
+                    logger.info("🛠️ Creating Top_categories_rank table...")
+                    conn.commit()
+                    trans = conn.begin()
+                    try:
+                        conn.execute(text("""
+                            CREATE TABLE IF NOT EXISTS `Top_categories_rank` (
+                                `id` int(11) NOT NULL AUTO_INCREMENT,
+                                `category_name` varchar(255) DEFAULT NULL,
+                                `category_rank` int(11) DEFAULT NULL,
+                                `business_count` int(11) DEFAULT 0,
+                                PRIMARY KEY (`id`),
+                                UNIQUE KEY `idx_cat_name` (`category_name`)
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                        """))
+                        trans.commit()
+                        logger.info("✅ Top_categories_rank table created successfully.")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create Top_categories_rank: {e}")
+                        trans.rollback()
+                
+                # Check and populate Top_categories_rank if empty
+                if table_exists('Top_categories_rank'):
+                    count_cats = conn.execute(text("SELECT COUNT(*) FROM Top_categories_rank")).scalar() or 0
+                    if count_cats == 0:
+                        logger.info("🌱 Populating Top_categories_rank initial ranks from category_master and master_table...")
+                        conn.commit()
+                        trans = conn.begin()
+                        try:
+                            # Try getting categories from category_master
+                            cats = []
+                            if table_exists('category_master'):
+                                cats_res = conn.execute(text("SELECT DISTINCT category_name FROM category_master WHERE category_name IS NOT NULL AND category_name != ''")).fetchall()
+                                cats = [r[0].strip() for r in cats_res]
+                            
+                            # Fallback to master_table if category_master is empty
+                            if not cats and table_exists('master_table'):
+                                cats_res = conn.execute(text("SELECT DISTINCT business_category FROM master_table WHERE business_category IS NOT NULL AND business_category != ''")).fetchall()
+                                cats = [r[0].strip() for r in cats_res]
+                                
+                            if cats:
+                                # Get counts from master_table
+                                counts_dict = {}
+                                if table_exists('master_table'):
+                                    counts_res = conn.execute(text("""
+                                        SELECT business_category, COUNT(1) as cnt
+                                        FROM master_table
+                                        WHERE business_category IS NOT NULL AND business_category != ''
+                                        GROUP BY business_category
+                                    """)).fetchall()
+                                    counts_dict = {r[0].strip().lower(): r[1] for r in counts_res}
+                                    
+                                cat_data = [{'name': c, 'count': counts_dict.get(c.lower(), 0)} for c in cats]
+                                cat_data.sort(key=lambda x: x['count'], reverse=True)
+                                
+                                # Assign ranks evenly
+                                total_cats = len(cat_data)
+                                chunk_size = max(1, total_cats // 4)
+                                for idx, item in enumerate(cat_data):
+                                    if idx < chunk_size:
+                                        rank = 1
+                                    elif idx < chunk_size * 2:
+                                        rank = 2
+                                    elif idx < chunk_size * 3:
+                                        rank = 3
+                                    else:
+                                        rank = 4
+                                    conn.execute(text("""
+                                        INSERT INTO Top_categories_rank (category_name, category_rank, business_count)
+                                        VALUES (:cat, :rank, :bc)
+                                        ON DUPLICATE KEY UPDATE category_rank=VALUES(category_rank), business_count=VALUES(business_count)
+                                    """), {"cat": item['name'], "rank": rank, "bc": item['count']})
+                            trans.commit()
+                            logger.info("✅ Top_categories_rank populated successfully.")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to populate Top_categories_rank: {e}")
+                            trans.rollback()
+
+                # 2. Top_cities_rank Table
+                if not table_exists('Top_cities_rank'):
+                    logger.info("🛠️ Creating Top_cities_rank table...")
+                    conn.commit()
+                    trans = conn.begin()
+                    try:
+                        conn.execute(text("""
+                            CREATE TABLE IF NOT EXISTS `Top_cities_rank` (
+                                `id` int(11) NOT NULL AUTO_INCREMENT,
+                                `state_name` varchar(255) DEFAULT NULL,
+                                `city_name` varchar(255) DEFAULT NULL,
+                                `city_rank` int(11) DEFAULT NULL,
+                                `business_count` int(11) DEFAULT 0,
+                                PRIMARY KEY (`id`),
+                                UNIQUE KEY `idx_state_city` (`state_name`, `city_name`)
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                        """))
+                        trans.commit()
+                        logger.info("✅ Top_cities_rank table created successfully.")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create Top_cities_rank: {e}")
+                        trans.rollback()
+
+                # Check and populate Top_cities_rank if empty
+                if table_exists('Top_cities_rank'):
+                    count_cities = conn.execute(text("SELECT COUNT(*) FROM Top_cities_rank")).scalar() or 0
+                    if count_cities == 0:
+                        logger.info("🌱 Populating Top_cities_rank initial ranks from location_master and master_table...")
+                        conn.commit()
+                        trans = conn.begin()
+                        try:
+                            # Try getting cities from location_master (level 3 join level 2 states)
+                            cities_list = []
+                            if table_exists('location_master'):
+                                cities_res = conn.execute(text("""
+                                    SELECT DISTINCT lm.name AS city_name, ps.name AS state_name
+                                    FROM location_master lm
+                                    JOIN location_master ps ON lm.parent_id = ps.id
+                                    WHERE lm.location_level = 3 AND ps.location_level = 2
+                                """)).fetchall()
+                                cities_list = [(r.city_name, r.state_name) for r in cities_res]
+                            
+                            # Fallback to master_table if location_master is empty
+                            if not cities_list and table_exists('master_table'):
+                                cities_res = conn.execute(text("""
+                                    SELECT DISTINCT city, state 
+                                    FROM master_table 
+                                    WHERE city IS NOT NULL AND city != '' AND state IS NOT NULL AND state != ''
+                                """)).fetchall()
+                                cities_list = [(r.city, r.state) for r in cities_res]
+                                
+                            if cities_list:
+                                # Get counts from master_table
+                                counts_dict = {}
+                                if table_exists('master_table'):
+                                    counts_res = conn.execute(text("""
+                                        SELECT city, COUNT(1) as cnt
+                                        FROM master_table
+                                        WHERE city IS NOT NULL AND city != ''
+                                        GROUP BY city
+                                    """)).fetchall()
+                                    counts_dict = {r[0].strip().lower(): r[1] for r in counts_res}
+                                    
+                                city_data = [{'city': c, 'state': s, 'count': counts_dict.get(c.lower(), 0)} for c, s in cities_list]
+                                city_data.sort(key=lambda x: x['count'], reverse=True)
+                                
+                                # Assign ranks evenly (1 to 5)
+                                total_cities = len(city_data)
+                                chunk_size = max(1, total_cities // 5)
+                                for idx, item in enumerate(city_data):
+                                    if idx < chunk_size:
+                                        rank = 1
+                                    elif idx < chunk_size * 2:
+                                        rank = 2
+                                    elif idx < chunk_size * 3:
+                                        rank = 3
+                                    elif idx < chunk_size * 4:
+                                        rank = 4
+                                    else:
+                                        rank = 5
+                                    conn.execute(text("""
+                                        INSERT INTO Top_cities_rank (state_name, city_name, city_rank, business_count)
+                                        VALUES (:state, :city, :rank, :bc)
+                                        ON DUPLICATE KEY UPDATE city_rank=VALUES(city_rank), business_count=VALUES(business_count)
+                                    """), {"state": item['state'], "city": item['city'], "rank": rank, "bc": item['count']})
+                            trans.commit()
+                            logger.info("✅ Top_cities_rank populated successfully.")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to populate Top_cities_rank: {e}")
+                            trans.rollback()
+
                 # === ISSUE 2: drive_folder_registry Status ENUM Fix ===
                 if table_exists('drive_folder_registry'):
                     conn.commit()  # Close the SELECT autobegin transaction

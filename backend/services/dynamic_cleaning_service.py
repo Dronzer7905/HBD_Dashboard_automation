@@ -2,9 +2,27 @@ import os
 import re
 import json
 import logging
-from sqlalchemy import text, bindparam
+from sqlalchemy import bindparam, text as sqlalchemy_text
 from extensions import db
 from datetime import datetime
+
+def text(sql_str):
+    dialect = db.engine.dialect.name
+    if dialect == 'postgresql':
+        if "FOREIGN_KEY_CHECKS" in sql_str:
+            return sqlalchemy_text("SELECT 1")
+        # Replace REGEXP operator with PostgreSQL ~ operator
+        sql_str = sql_str.replace(" REGEXP ", " ~ ")
+        # Quote capitalized Location_Master_India table to preserve casing in PG
+        sql_str = sql_str.replace("Location_Master_India", '"Location_Master_India"')
+        # Replace HAVING cnt > 1 alias with aggregate check for PostgreSQL compatibility
+        sql_str = sql_str.replace("HAVING cnt > 1", "HAVING COUNT(*) > 1")
+        # Remove MySQL-specific collations
+        sql_str = sql_str.replace(" COLLATE utf8mb4_general_ci", "")
+        # Translate CREATE TABLE x LIKE y to PG syntax
+        import re
+        sql_str = re.sub(r"CREATE TABLE (\w+) LIKE (\w+)", r"CREATE TABLE \1 (LIKE \2 INCLUDING ALL)", sql_str)
+    return sqlalchemy_text(sql_str)
 
 logger = logging.getLogger("DynamicCleaningService")
 
