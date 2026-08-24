@@ -642,14 +642,34 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 })
                             
                             # Bulk insert
-                            db.session.execute(
-                                text("""
-                                    INSERT IGNORE INTO unmatched_data_review
-                                        (data_type, invalid_value, correction_status, table_name, row_id, row_data)
-                                    VALUES (:data_type, :invalid_value, :correction_status, :table_name, :row_id, :row_data)
-                                """),
-                                unmatched_params
-                            )
+                            dialect = db.engine.dialect.name
+                            if dialect == 'postgresql':
+                                raw_conn = db.session.connection().connection
+                                with raw_conn.cursor() as raw_cur:
+                                    from psycopg2.extras import execute_values
+                                    unmatched_tuples = [(
+                                        p["data_type"], p["invalid_value"], p["correction_status"],
+                                        p["table_name"], p["row_id"], p["row_data"]
+                                    ) for p in unmatched_params]
+                                    execute_values(
+                                        raw_cur,
+                                        """
+                                            INSERT INTO unmatched_data_review
+                                                (data_type, invalid_value, correction_status, table_name, row_id, row_data)
+                                            VALUES %s
+                                            ON CONFLICT DO NOTHING
+                                        """,
+                                        unmatched_tuples
+                                    )
+                            else:
+                                db.session.execute(
+                                    text("""
+                                        INSERT IGNORE INTO unmatched_data_review
+                                            (data_type, invalid_value, correction_status, table_name, row_id, row_data)
+                                        VALUES (:data_type, :invalid_value, :correction_status, :table_name, :row_id, :row_data)
+                                    """),
+                                    unmatched_params
+                                )
                             
                             # Bulk delete
                             delete_rows_by_ids("master_table", unmatched_ids)
@@ -986,14 +1006,34 @@ def run_cleaning_async(run_id, table_name, run_type, app_context):
                                 })
                             
                             # Bulk insert
-                            db.session.execute(
-                                text("""
-                                    INSERT IGNORE INTO unmatched_data_review
-                                        (data_type, invalid_value, correction_status, table_name, row_id, row_data)
-                                    VALUES (:data_type, :invalid_value, :correction_status, :table_name, :row_id, :row_data)
-                                """),
-                                unmatched_params
-                            )
+                            dialect = db.engine.dialect.name
+                            if dialect == 'postgresql':
+                                raw_conn = db.session.connection().connection
+                                with raw_conn.cursor() as raw_cur:
+                                    from psycopg2.extras import execute_values
+                                    unmatched_tuples = [(
+                                        p["data_type"], p["invalid_value"], p["correction_status"],
+                                        p["table_name"], p["row_id"], p["row_data"]
+                                    ) for p in unmatched_params]
+                                    execute_values(
+                                        raw_cur,
+                                        """
+                                            INSERT INTO unmatched_data_review
+                                                (data_type, invalid_value, correction_status, table_name, row_id, row_data)
+                                            VALUES %s
+                                            ON CONFLICT DO NOTHING
+                                        """,
+                                        unmatched_tuples
+                                    )
+                            else:
+                                db.session.execute(
+                                    text("""
+                                        INSERT IGNORE INTO unmatched_data_review
+                                            (data_type, invalid_value, correction_status, table_name, row_id, row_data)
+                                        VALUES (:data_type, :invalid_value, :correction_status, :table_name, :row_id, :row_data)
+                                    """),
+                                    unmatched_params
+                                )
                             
                             # Bulk delete
                             delete_rows_by_ids("product_master", unmatched_ids)
