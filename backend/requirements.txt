@@ -25,3 +25,5 @@ flask_mail
 flask_migrate
 pdfplumber
 scrapy
+psycopg2-binary
+psycogreen

@@ -123,6 +123,29 @@ import { element } from "prop-types";
 import LocationMasterData from "./componunts/masterdata/LocationMasterData";
 import MasterCategoryManager from "./componunts/masterdata/MasterCategoryManager";
 import CategoryMappingDashboard from "./componunts/masterdata/CategoryMappingDashboard";
+// --- HBD Reports + Data Enrichment (live from the reports database) ---
+import {
+  DocumentChartBarIcon,
+  PresentationChartLineIcon,
+  ChartPieIcon,
+  TrophyIcon,
+  ListBulletIcon,
+  ShareIcon,
+  CircleStackIcon,
+  SparklesIcon,
+  Squares2X2Icon,
+} from "@heroicons/react/24/solid";
+import ReportsOverview from "./componunts/HBD Reports/ReportsOverview";
+import HbdReport from "./componunts/HBD Reports/HbdReport";
+import CountReport from "./componunts/HBD Reports/CountReport";
+import RankingReport from "./componunts/HBD Reports/RankingReport";
+import FieldAvailability from "./componunts/HBD Reports/FieldAvailability";
+import HierarchyReport from "./componunts/HBD Reports/HierarchyReport";
+import DatabaseTables from "./componunts/HBD Reports/DatabaseTables";
+import AllProductTables from "./componunts/Data Enrichment/AllProductTables";
+import CategoriesEnrichmentReport from "./componunts/Data Enrichment/CategoriesEnrichmentReport";
+import ProductsEnrichmentReport from "./componunts/Data Enrichment/ProductsEnrichmentReport";
+import AttributesEnrichmentReport from "./componunts/Data Enrichment/AttributesEnrichmentReport";
 const icon = {
   className: "w-5 h-5 text-inherit",
 };
@@ -198,6 +221,84 @@ export const routes = [
         name: "Master Dashboard",
         path: "/masterdata/dashboard",
         element: <MasterDataDashboard />,
+      },
+      {
+        icon: <DocumentChartBarIcon {...icon} />,
+        name: "HBD Reports",
+        children: [
+          {
+            icon: <Squares2X2Icon {...icon} />,
+            name: "Overview",
+            path: "/hbd-reports/overview",
+            element: <ReportsOverview />,
+          },
+          {
+            icon: <PresentationChartLineIcon {...icon} />,
+            name: "HBD Report",
+            path: "/hbd-reports/hbd",
+            element: <HbdReport />,
+          },
+          {
+            icon: <ChartPieIcon {...icon} />,
+            name: "Count Report",
+            path: "/hbd-reports/count",
+            element: <CountReport />,
+          },
+          {
+            icon: <TrophyIcon {...icon} />,
+            name: "Ranking Report",
+            path: "/hbd-reports/ranking",
+            element: <RankingReport />,
+          },
+          {
+            icon: <ListBulletIcon {...icon} />,
+            name: "Master Table Fields",
+            path: "/hbd-reports/field-availability",
+            element: <FieldAvailability />,
+          },
+          {
+            icon: <ShareIcon {...icon} />,
+            name: "Hierarchy Check",
+            path: "/hbd-reports/hierarchy",
+            element: <HierarchyReport />,
+          },
+          {
+            icon: <CircleStackIcon {...icon} />,
+            name: "Database Tables",
+            path: "/hbd-reports/db-tables",
+            element: <DatabaseTables />,
+          },
+          {
+            icon: <SparklesIcon {...icon} />,
+            name: "Data Enrichment",
+            children: [
+              {
+                icon: <RectangleStackIcon {...icon} />,
+                name: "All Product Tables",
+                path: "/hbd-reports/data-enrichment/all-tables",
+                element: <AllProductTables />,
+              },
+              {
+                icon: <TableCellsIcon {...icon} />,
+                name: "Categories",
+                path: "/hbd-reports/data-enrichment/categories",
+                element: <CategoriesEnrichmentReport />,
+              },
+              {
+                icon: <ShoppingCartIcon {...icon} />,
+                name: "Products",
+                path: "/hbd-reports/data-enrichment/products",
+                element: <ProductsEnrichmentReport />,
+              },
+              {
+                icon: <ListBulletIcon {...icon} />,
+                name: "Attributes",
+                path: "/hbd-reports/data-enrichment/attributes",
+                element: <AttributesEnrichmentReport />,
+              },
+            ],
+          },
+        ],
       },
       // ... (Rest of your code remains unchanged)
       {
