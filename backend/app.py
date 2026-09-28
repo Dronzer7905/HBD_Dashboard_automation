@@ -132,6 +132,8 @@ from routes.data_cleaning_routes import data_cleaning_bp
 from routes.category_mapping_routes import category_mapping_bp
 from routes.master_category_routes import master_category_bp
 from routes.dynamic_tier_routes import dynamic_tier_bp
+from routes.data_enrichment_routes import data_enrichment_bp
+from routes.hbd_reports_routes import hbd_reports_bp
 
 # --- Initialize App ---
 load_dotenv(override=True)
@@ -415,6 +417,8 @@ app.register_blueprint(data_cleaning_bp, url_prefix="/api/cleaning")
 app.register_blueprint(category_mapping_bp, url_prefix="/api/category-mapping")
 app.register_blueprint(master_category_bp, url_prefix="/api/master-categories")
 app.register_blueprint(dynamic_tier_bp)
+app.register_blueprint(data_enrichment_bp, url_prefix="/api/data-enrichment")
+app.register_blueprint(hbd_reports_bp, url_prefix="/api/hbd-reports")
 
 # --- Register Listing & Product Blueprints (Batch) ---
 blueprints_listing = [
