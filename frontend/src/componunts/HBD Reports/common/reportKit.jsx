@@ -35,7 +35,7 @@ import {
   Cell,
   LabelList,
 } from "recharts";
-import api from "../../../configs/api";
+import api from "../../../utils/Api";
 
 // ─── Colours ────────────────────────────────────────────────────────────────
 // Categorical order is fixed (validated for colour-blind separation) - never cycled.
