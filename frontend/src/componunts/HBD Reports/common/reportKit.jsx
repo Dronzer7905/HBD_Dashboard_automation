@@ -8,8 +8,10 @@
  *  - StatusBadge, FillBar     status (icon + label, never colour alone) and inline % bars
  *  - DataTable                sortable, searchable table with CSV download
  *  - SimpleBar, SimplePie     recharts wrappers with a colour-blind-checked palette
+ *  - detailPath, DrillLink    links into the Detail Report with filters pre-set
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardBody, CardHeader, Typography, Spinner, Button } from "@material-tailwind/react";
 import {
   ArrowPathIcon,
@@ -72,15 +74,18 @@ export function useReport(url, params) {
     loading: true, data: null, errors: [], error: null, generatedAt: null, cached: false,
   });
   const paramsKey = JSON.stringify(params || {});
+  const latest = useRef(0); // only the newest request may update the page (filters change fast)
 
   const load = useCallback(
     async (refresh = false) => {
+      const id = ++latest.current;
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const res = await api.get(url, {
           params: { ...(params || {}), ...(refresh ? { refresh: true } : {}) },
           timeout: 300000,
         });
+        if (id !== latest.current) return;
         const body = res.data || {};
         if (body.status !== "success") throw new Error(body.message || "Report failed");
         setState({
@@ -88,6 +93,7 @@ export function useReport(url, params) {
           generatedAt: body.generated_at, cached: !!body.cached,
         });
       } catch (e) {
+        if (id !== latest.current) return;
         const msg = e?.response?.data?.message || e?.message || "Could not load the report.";
         setState((s) => ({ ...s, loading: false, error: msg }));
       }
@@ -100,7 +106,8 @@ export function useReport(url, params) {
     load(false);
   }, [load]);
 
-  return { ...state, reload: () => load(true) };
+  const mutate = useCallback((updater) => setState((s) => ({ ...s, data: updater(s.data) })), []);
+  return { ...state, reload: () => load(true), mutate };
 }
 
 // ─── Layout pieces ──────────────────────────────────────────────────────────
@@ -302,14 +309,61 @@ export function downloadCsv(filename, columns, rows) {
 }
 
 /**
- * columns: [{ key, label, align, render(row), sortValue(row), csv(row), hidden (CSV only), nowrap }]
+ * columns: [{ key, label, align, render(row), sortValue(row), csv(row), filterValue(row),
+ *             filter (false = no filter box), hidden (CSV only), nowrap }]
+ *
+ * Every visible column gets a filter box under its header:
+ *   - columns with only a few different values get a dropdown
+ *   - number columns accept  >1000  <50  >=10  <=5  =0  or a plain number
+ *   - text columns match anything containing what you type (not case sensitive)
  */
+const rawFilterValue = (c, r) => {
+  const v = c.filterValue ? c.filterValue(r) : c.csv ? c.csv(r) : r[c.key];
+  if (Array.isArray(v)) return v.map((x) => (typeof x === "object" && x ? x.name ?? "" : x)).join(", ");
+  return v;
+};
+
+function matchesNumber(value, expr) {
+  const m = /^(>=|<=|>|<|=)?\s*(-?[\d,.]+)$/.exec(expr.trim());
+  if (!m) return null; // not a number expression -> caller falls back to text match
+  const n = Number(value);
+  if (value === null || value === undefined || value === "" || Number.isNaN(n)) return false;
+  const target = Number(m[2].replace(/,/g, ""));
+  switch (m[1]) {
+    case ">": return n > target;
+    case "<": return n < target;
+    case ">=": return n >= target;
+    case "<=": return n <= target;
+    default: return n === target;
+  }
+}
+
 export function DataTable({
   columns, rows, filename = "report", searchable = false, searchKeys, maxHeight = 520,
-  initialSort, footer, toolbar, emptyText = "No rows.",
+  initialSort, footer, toolbar, emptyText = "No rows.", filters: showFilters = true,
 }) {
   const [sort, setSort] = useState(initialSort || null);
   const [query, setQuery] = useState("");
+  const [colFilters, setColFilters] = useState({});
+
+  // What kind of filter each column gets (dropdown / number / text)
+  const filterMeta = useMemo(() => {
+    const meta = {};
+    for (const c of columns) {
+      if (c.hidden || c.filter === false) continue;
+      const vals = (rows || []).map((r) => rawFilterValue(c, r)).filter((v) => v !== null && v !== undefined && v !== "");
+      const numeric = vals.length > 0 && vals.every((v) => typeof v === "number");
+      const distinct = [...new Set(vals.map((v) => String(v)))];
+      if (!numeric && distinct.length > 1 && distinct.length <= 12) {
+        meta[c.key] = { type: "select", options: distinct.sort((a, b) => a.localeCompare(b)) };
+      } else {
+        meta[c.key] = { type: numeric ? "number" : "text" };
+      }
+    }
+    return meta;
+  }, [columns, rows]);
+
+  const activeFilters = Object.entries(colFilters).filter(([, v]) => v !== undefined && String(v).trim() !== "");
 
   const filtered = useMemo(() => {
     let out = rows || [];
@@ -317,6 +371,21 @@ export function DataTable({
       const q = query.trim().toLowerCase();
       const keys = searchKeys || columns.map((c) => c.key);
       out = out.filter((r) => keys.some((k) => String(r[k] ?? "").toLowerCase().includes(q)));
+    }
+    for (const [key, fv] of activeFilters) {
+      const col = columns.find((c) => c.key === key);
+      const meta = filterMeta[key];
+      if (!col || !meta) continue;
+      const f = String(fv).trim();
+      out = out.filter((r) => {
+        const v = rawFilterValue(col, r);
+        if (meta.type === "select") return String(v ?? "") === f;
+        if (meta.type === "number") {
+          const res = matchesNumber(v, f);
+          if (res !== null) return res;
+        }
+        return String(v ?? "").toLowerCase().includes(f.toLowerCase());
+      });
     }
     if (sort) {
       const col = columns.find((c) => c.key === sort.key);
@@ -332,7 +401,8 @@ export function DataTable({
       });
     }
     return out;
-  }, [rows, query, sort, columns, searchKeys]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, query, sort, columns, searchKeys, colFilters, filterMeta]);
 
   const visible = columns.filter((c) => !c.hidden);
 
@@ -354,8 +424,14 @@ export function DataTable({
           </div>
         )}
         {toolbar}
+        {activeFilters.length > 0 && (
+          <Button size="sm" variant="outlined" color="blue-gray" className="py-1.5" onClick={() => setColFilters({})}>
+            Clear {activeFilters.length} filter{activeFilters.length > 1 ? "s" : ""}
+          </Button>
+        )}
         <span className="text-xs text-gray-600">
-          {fmt(filtered.length)} row{filtered.length === 1 ? "" : "s"}
+          {fmt(filtered.length)} {(rows || []).length !== filtered.length ? `of ${fmt((rows || []).length)} ` : ""}row
+          {filtered.length === 1 ? "" : "s"}
         </span>
         <Button
           size="sm"
@@ -387,6 +463,40 @@ export function DataTable({
                 </th>
               ))}
             </tr>
+            {showFilters && (
+              <tr className="bg-white">
+                {visible.map((c) => {
+                  const meta = filterMeta[c.key];
+                  const val = colFilters[c.key] ?? "";
+                  const set = (v) => setColFilters((f) => ({ ...f, [c.key]: v }));
+                  const cls = `w-full min-w-[70px] rounded border px-2 py-1 text-xs font-normal normal-case text-blue-gray-800 focus:border-blue-500 focus:outline-none ${
+                    val ? "border-blue-400 bg-blue-50" : "border-gray-300"
+                  }`;
+                  return (
+                    <th key={c.key} className="border-b border-blue-gray-100 px-2 py-1.5">
+                      {!meta ? null : meta.type === "select" ? (
+                        <select value={val} onChange={(e) => set(e.target.value)} className={cls} aria-label={`Filter ${c.label}`}>
+                          <option value="">All</option>
+                          {meta.options.map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={val}
+                          onChange={(e) => set(e.target.value)}
+                          placeholder={meta.type === "number" ? "e.g. >1000" : "Filter..."}
+                          className={cls}
+                          aria-label={`Filter ${c.label}`}
+                        />
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
+            )}
           </thead>
           <tbody>
             {filtered.length === 0 && (
@@ -528,3 +638,20 @@ export function SimplePie({ data, colors, height = 260, valueFormatter = fmt, st
 }
 
 export const reportPath = (p) => `/dashboard/hbd-reports${p}`;
+
+/** Link to the Detail Report with filters already set, e.g. detailPath({ list: "city", rank: 1 }). */
+export const detailPath = (params) => {
+  const qs = new URLSearchParams(
+    Object.entries(params || {}).filter(([, v]) => v !== null && v !== undefined && v !== ""),
+  ).toString();
+  return reportPath(`/detail${qs ? `?${qs}` : ""}`);
+};
+
+/** A number (or any text) that opens the list behind it. */
+export function DrillLink({ to, children, title = "Open the full list" }) {
+  return (
+    <Link to={detailPath(to)} title={title} className="font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:decoration-blue-700">
+      {children}
+    </Link>
+  );
+}

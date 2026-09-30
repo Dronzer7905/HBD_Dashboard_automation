@@ -19,6 +19,10 @@ Configuration (environment variables, checked in this order):
     Optional: REPORTS_DB_SCHEMA (defaults to the connection's current schema,
     normally "public" on Postgres).
 
+    Optional: ENRICHMENT_DB_URL - only if the Data Enrichment raw tables
+    (raw_schools, osm_points_raw ...) live in a DIFFERENT database. When it
+    is not set, the enrichment pages read the same database as the reports.
+
 Everything here is read-only. No INSERT / UPDATE / DELETE anywhere.
 """
 
@@ -31,14 +35,16 @@ import urllib.parse
 
 from sqlalchemy import create_engine, text
 
-_engine = None
+_engines = {}
+_engine_sources = {}
 _engine_lock = threading.Lock()
-_engine_source = None
 
 
 # ─── Engine ──────────────────────────────────────────────────────────────────
 
-def _build_url():
+def _build_url(which="reports"):
+    if which == "enrichment" and os.getenv("ENRICHMENT_DB_URL"):
+        return os.getenv("ENRICHMENT_DB_URL"), "ENRICHMENT_DB_URL"
     url = os.getenv("REPORTS_DB_URL")
     if url:
         return url, "REPORTS_DB_URL"
@@ -71,16 +77,16 @@ def _make_psycopg_gevent_friendly():
         pass
 
 
-def get_engine():
-    """Create the reports engine on first use (so a bad/missing driver never breaks app start-up)."""
-    global _engine, _engine_source
-    if _engine is None:
+def get_engine(which="reports"):
+    """Create the engine on first use (so a bad/missing driver never breaks app start-up)."""
+    key = "enrichment" if (which == "enrichment" and os.getenv("ENRICHMENT_DB_URL")) else "reports"
+    if key not in _engines:
         with _engine_lock:
-            if _engine is None:
-                url, source = _build_url()
+            if key not in _engines:
+                url, source = _build_url(key)
                 if url.startswith("postgresql"):
                     _make_psycopg_gevent_friendly()
-                _engine = create_engine(
+                _engines[key] = create_engine(
                     url,
                     pool_pre_ping=True,
                     pool_recycle=280,
@@ -88,13 +94,14 @@ def get_engine():
                     max_overflow=5,
                     connect_args={"connect_timeout": 15},
                 )
-                _engine_source = source
-    return _engine
+                _engine_sources[key] = source
+    return _engines[key]
 
 
-def engine_source():
-    get_engine()
-    return _engine_source
+def engine_source(which="reports"):
+    get_engine(which)
+    key = "enrichment" if (which == "enrichment" and os.getenv("ENRICHMENT_DB_URL")) else "reports"
+    return _engine_sources[key]
 
 
 # ─── Dialect helpers ─────────────────────────────────────────────────────────
@@ -259,17 +266,35 @@ class report_connection:
     always rolls back at the end - reports never write anything.
     """
 
-    def __init__(self, timeout_ms=60000):
+    def __init__(self, timeout_ms=60000, db="reports"):
         self.timeout_ms = timeout_ms
+        self.db = db
 
     def __enter__(self):
-        self._conn = get_engine().connect()
+        self._conn = get_engine(self.db).connect()
         self._trans = self._conn.begin()
         return ReportConn(self._conn, self.timeout_ms)
 
     def __exit__(self, exc_type, exc, tb):
         try:
             self._trans.rollback()
+        finally:
+            self._conn.close()
+        return False
+
+
+class report_write_connection(report_connection):
+    """
+    Same as report_connection but COMMITS on success. Only used for the small
+    report tracking table (hbd_report_table_status) - never for data tables.
+    """
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is None:
+                self._trans.commit()
+            else:
+                self._trans.rollback()
         finally:
             self._conn.close()
         return False
@@ -312,6 +337,14 @@ def cached(key, builder, refresh=False, ttl=None):
         with _cache_lock:
             _cache[key] = (time.time(), payload)
         return payload, False
+
+
+def invalidate(*prefixes):
+    """Drop cached reports whose key starts with any of the prefixes (after a save)."""
+    with _cache_lock:
+        for key in list(_cache.keys()):
+            if any(key.startswith(p) for p in prefixes):
+                _cache.pop(key, None)
 
 
 def to_json_safe(value):
