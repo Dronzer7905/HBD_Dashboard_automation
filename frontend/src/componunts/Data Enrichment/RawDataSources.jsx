@@ -38,7 +38,6 @@ export function RawDataSources() {
           .sort((a, b) => b.rows - a.rows)
           .slice(0, 15)
           .map((r) => ({ name: r.table, "Live rows": r.rows, "Sheet count": r.sheet_count || 0 }));
-        const people = (data.people || []).map((p) => ({ name: p.name, "In database": p.in_db, "Not in database": p.tables - p.in_db }));
 
         const columns = [
           { key: "group", label: "Group" },
@@ -132,37 +131,9 @@ export function RawDataSources() {
               <KpiCard label="Count differs from sheet" value={fmt(t.differs)} status={t.differs ? "critical" : "good"} sub="live rows ≠ sheet number" />
             </div>
 
-            <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
               <ChartCard title="Status" subtitle={`Complete = columns ≥ ${data.complete_fill_pct}% filled (first ${fmt(data.sample_rows)} rows)`}>
                 <SimplePie data={statusPie} stack valueFormatter={(v) => `${v} table${v === 1 ? "" : "s"}`} />
-              </ChartCard>
-              <ChartCard title="Largest tables - live vs sheet" subtitle="Top 15 by live rows" className="xl:col-span-2">
-                <SimpleBar
-                  data={sizeChart}
-                  bars={[
-                    { key: "Live rows", color: SERIES[0] },
-                    { key: "Sheet count", color: SERIES[1] },
-                  ]}
-                  horizontal
-                  height={Math.max(260, sizeChart.length * 34)}
-                  yWidth={190}
-                />
-              </ChartCard>
-            </div>
-
-            <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
-              <ChartCard title="Tables by person" subtitle="Done by, from the sheet (or the team's Edit)" className="xl:col-span-2">
-                <SimpleBar
-                  data={people}
-                  bars={[
-                    { key: "In database", color: SERIES[2] },
-                    { key: "Not in database", color: STATUS.critical.color },
-                  ]}
-                  stacked
-                  height={Math.max(220, people.length * 36)}
-                  horizontal
-                  yWidth={90}
-                />
               </ChartCard>
               <ChartCard title="Groups in the sheet">
                 <ul className="space-y-2">
@@ -178,6 +149,19 @@ export function RawDataSources() {
                 <Typography className="mt-3 text-xs text-gray-600">Reading from: {data.database}</Typography>
               </ChartCard>
             </div>
+
+            <ChartCard title="Largest tables - live vs sheet" subtitle="Top 15 by live rows" className="mb-6">
+              <SimpleBar
+                data={sizeChart}
+                bars={[
+                  { key: "Live rows", color: SERIES[0] },
+                  { key: "Sheet count", color: SERIES[1] },
+                ]}
+                horizontal
+                height={Math.max(260, sizeChart.length * 34)}
+                yWidth={190}
+              />
+            </ChartCard>
 
             <ChartCard
               title="All sources"
