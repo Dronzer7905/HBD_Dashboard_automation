@@ -142,10 +142,16 @@ import RankingReport from "./componunts/HBD Reports/RankingReport";
 import FieldAvailability from "./componunts/HBD Reports/FieldAvailability";
 import HierarchyReport from "./componunts/HBD Reports/HierarchyReport";
 import DatabaseTables from "./componunts/HBD Reports/DatabaseTables";
+import DetailReport from "./componunts/HBD Reports/DetailReport";
 import AllProductTables from "./componunts/Data Enrichment/AllProductTables";
 import CategoriesEnrichmentReport from "./componunts/Data Enrichment/CategoriesEnrichmentReport";
 import ProductsEnrichmentReport from "./componunts/Data Enrichment/ProductsEnrichmentReport";
 import AttributesEnrichmentReport from "./componunts/Data Enrichment/AttributesEnrichmentReport";
+import EnrichmentProcess from "./componunts/Data Enrichment/EnrichmentProcess";
+import RawDataSources from "./componunts/Data Enrichment/RawDataSources";
+import UrlExtractionReport from "./componunts/Data Enrichment/UrlExtractionReport";
+import LocationMatchingReport from "./componunts/Data Enrichment/LocationMatchingReport";
+import { PresentationChartLineIcon as DeProcessIcon, ServerStackIcon as DeRawIcon, LinkIcon as DeUrlIcon, MapPinIcon as DeLocationIcon } from "@heroicons/react/24/solid";
 const icon = {
   className: "w-5 h-5 text-inherit",
 };
@@ -251,6 +257,12 @@ export const routes = [
             element: <RankingReport />,
           },
           {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Detail Report",
+            path: "/hbd-reports/detail",
+            element: <DetailReport />,
+          },
+          {
             icon: <ListBulletIcon {...icon} />,
             name: "Master Table Fields",
             path: "/hbd-reports/field-availability",
@@ -272,6 +284,30 @@ export const routes = [
             icon: <SparklesIcon {...icon} />,
             name: "Data Enrichment",
             children: [
+              {
+                icon: <DeProcessIcon {...icon} />,
+                name: "Master Report",
+                path: "/hbd-reports/data-enrichment/process",
+                element: <EnrichmentProcess />,
+              },
+              {
+                icon: <DeRawIcon {...icon} />,
+                name: "Raw Data Sources",
+                path: "/hbd-reports/data-enrichment/raw-sources",
+                element: <RawDataSources />,
+              },
+              {
+                icon: <DeUrlIcon {...icon} />,
+                name: "URL Extraction",
+                path: "/hbd-reports/data-enrichment/url-extraction",
+                element: <UrlExtractionReport />,
+              },
+              {
+                icon: <DeLocationIcon {...icon} />,
+                name: "Location Matching",
+                path: "/hbd-reports/data-enrichment/location-matching",
+                element: <LocationMatchingReport />,
+              },
               {
                 icon: <RectangleStackIcon {...icon} />,
                 name: "All Product Tables",

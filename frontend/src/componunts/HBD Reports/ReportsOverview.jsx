@@ -4,7 +4,7 @@ import { Typography } from "@material-tailwind/react";
 import { ArrowRightIcon } from "@heroicons/react/24/solid";
 import {
   useReport, Section, KpiCard, ChartCard, SimpleBar, SimplePie, foldForPie, LiveStamp, RefreshButton,
-  SERIES, RANK_RAMP, OTHER_GRAY, fmt, fmtPct, reportPath,
+  SERIES, RANK_RAMP, OTHER_GRAY, STATUS, fmt, fmtPct, reportPath,
 } from "./common/reportKit";
 
 const STAGE_SHORT = { scrap: "1. Scrap", clean: "2. Clean", merge: "3. Merge", match: "4. Match", ready: "5. Ready" };
@@ -13,10 +13,15 @@ const REPORT_INDEX = [
   { path: "/hbd", title: "HBD Report", text: "5-stage data journey with live counts, cleaning tiers, targets vs progress." },
   { path: "/count", title: "Count Report", text: "Master vs data coverage per field (Dashboard_count sheet) + pending vs completed." },
   { path: "/ranking", title: "Ranking Report", text: "Location type × rank (Ranking_Count sheet), top cities and categories." },
+  { path: "/detail", title: "Detail Report", text: "The full list behind every number - e.g. which cities are in Rank 1, with state, records and pending, filter on every column." },
   { path: "/field-availability", title: "Master Table Fields", text: "Which of the master table's columns actually have data." },
   { path: "/hierarchy", title: "Hierarchy Check", text: "Parent-child health of locations and category trees." },
-  { path: "/db-tables", title: "Database Tables", text: "Every table with group, columns and record count (dashboard db new sheet)." },
-  { path: "/data-enrichment/all-tables", title: "Data Enrichment", text: "All six product tables in one place, then categories, marketplaces and attributes." },
+  { path: "/db-tables", title: "Database Tables", text: "Every table with group, record count and Complete / not complete status - editable (dashboard db new sheet)." },
+  { path: "/data-enrichment/process", title: "Data Enrichment - Master Report", text: "The 12-step enrichment process (CSV → clean → rank → map → validate → TestDB), each step with live numbers." },
+  { path: "/data-enrichment/raw-sources", title: "Raw Data Sources", text: "The team's Data Enrichment sheet (schools, colleges, OSM, IFSC, ATMs ...) vs live rows, fill %, lat/long and done by." },
+  { path: "/data-enrichment/url-extraction", title: "URL Extraction", text: "url_extraction_master: how much city, state, category and source the URL pipeline filled." },
+  { path: "/data-enrichment/location-matching", title: "Location Matching", text: "State sync, missing regions / areas, the 14 new cities and ranking - report numbers re-checked live." },
+  { path: "/data-enrichment/all-tables", title: "Product Tables", text: "All six product tables in one place, then categories, marketplaces and attributes." },
 ];
 
 function OpenLink({ to, label = "Open report" }) {
@@ -57,7 +62,17 @@ export function ReportsOverview() {
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <KpiCard label="Tables" value={tables.data ? fmt(tables.data.totals?.tables) : "…"} sub="in the database" />
+        <KpiCard
+          label="Tables"
+          value={tables.data ? fmt(tables.data.totals?.tables) : "…"}
+          sub={
+            tables.data
+              ? `${(tables.data.tables || []).filter((x) => x.status === "Complete").length} complete · ${
+                  (tables.data.tables || []).filter((x) => x.status !== "Complete").length
+                } not complete`
+              : "in the database"
+          }
+        />
         <KpiCard label="Total records" value={tables.data ? fmt(tables.data.totals?.rows) : "…"} sub="all tables" accent={SERIES[2]} />
         <KpiCard label="Listing master" value={hbd.data ? fmt(hbd.data.stages?.find((s) => s.key === "ready")?.metrics?.[0]?.value) : "…"} sub="master_table" accent={SERIES[1]} />
         <KpiCard label="Location master" value={ranking.data ? fmt(ranking.data.location_rank?.total_location_master) : "…"} sub="location_master" accent={RANK_RAMP[0]} />
@@ -81,8 +96,18 @@ export function ReportsOverview() {
           </Section>
         </ChartCard>
 
-        <ChartCard title="Records by table group" subtitle="Where the data in the database sits" right={<OpenLink to="/db-tables" />}>
-          <Section report={tables}>{(d) => <SimplePie data={foldForPie(d.groups, 6, "group", "rows")} />}</Section>
+        <ChartCard title="Table completion" subtitle="Which tables are complete and which are not" right={<OpenLink to="/db-tables" />}>
+          <Section report={tables}>
+            {(d) => (
+              <SimplePie
+                data={(d.status_summary || []).map((x) => ({
+                  ...x,
+                  color: STATUS[{ Complete: "good", Partial: "warning", "In progress": "warning", Empty: "critical", "Not started": "critical" }[x.name]]?.color || OTHER_GRAY,
+                }))}
+                valueFormatter={(v) => `${v} table${v === 1 ? "" : "s"}`}
+              />
+            )}
+          </Section>
         </ChartCard>
 
         <ChartCard title="Data pipeline" subtitle="Scrap → Clean → Merge → Match → Ready" right={<OpenLink to="/hbd" />}>

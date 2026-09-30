@@ -1,9 +1,22 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { Typography } from "@material-tailwind/react";
+import { ArrowRightIcon } from "@heroicons/react/24/solid";
 import {
-  useReport, ReportLayout, KpiCard, ChartCard, DataTable, SimpleBar, SimplePie,
+  useReport, ReportLayout, KpiCard, ChartCard, DataTable, SimpleBar, SimplePie, DrillLink, detailPath, reportPath,
   RANK_RAMP, OTHER_GRAY, SERIES, fmt, fmtPct,
 } from "./common/reportKit";
+
+// pivot column -> rank filter of the Detail Report
+const rankParam = (col) => (col === "Unranked" ? "none" : col === "Rank 6+" ? "6+" : (/Rank (\d+)/.exec(col) || [])[1]);
+
+function FullListLink({ to, label = "Full list", href }) {
+  return (
+    <Link to={href ? reportPath(href) : detailPath(to)} className="inline-flex flex-none items-center gap-1 whitespace-nowrap text-xs font-semibold text-blue-700 hover:underline">
+      {label} <ArrowRightIcon className="h-3.5 w-3.5" />
+    </Link>
+  );
+}
 
 const rankColor = (name) => {
   const m = /Rank (\d)/.exec(name || "");
@@ -12,7 +25,7 @@ const rankColor = (name) => {
   return OTHER_GRAY;
 };
 
-function RankListCard({ title, subtitle, block, itemLabel }) {
+function RankListCard({ title, subtitle, block, itemLabel, list }) {
   if (!block) {
     return (
       <ChartCard title={title} subtitle={subtitle}>
@@ -22,15 +35,20 @@ function RankListCard({ title, subtitle, block, itemLabel }) {
   }
   const rows = block.by_rank || [];
   const chart = rows.map((r) => ({ name: r.rank === null ? "Unranked" : `Rank ${r.rank}`, [itemLabel]: r.items, "With data": r.with_data }));
+  const rp = (r) => (r.rank === null ? "none" : r.rank);
   const columns = [
-    { key: "rank", label: "Rank", render: (r) => (r.rank === null ? "Unranked" : `Rank ${r.rank}`) },
-    { key: "items", label: itemLabel, align: "right", render: (r) => fmt(r.items) },
-    { key: "with_data", label: "With real data", align: "right", render: (r) => fmt(r.with_data) },
+    { key: "rank", label: "Rank", render: (r) => <DrillLink to={{ list, rank: rp(r) }}>{r.rank === null ? "Unranked" : `Rank ${r.rank}`}</DrillLink>, csv: (r) => (r.rank === null ? "Unranked" : `Rank ${r.rank}`) },
+    { key: "items", label: itemLabel, align: "right", render: (r) => <DrillLink to={{ list, rank: rp(r) }}>{fmt(r.items)}</DrillLink> },
+    { key: "with_data", label: "With real data", align: "right", render: (r) => <DrillLink to={{ list, rank: rp(r), status: "has_data" }}>{fmt(r.with_data)}</DrillLink> },
     { key: "with_data_pct", label: "Coverage", align: "right", render: (r) => fmtPct(r.with_data_pct) },
     { key: "businesses", label: "Businesses", align: "right", render: (r) => fmt(r.businesses) },
   ];
   return (
-    <ChartCard title={title} subtitle={`${subtitle} · ${fmt(block.total_items)} ${itemLabel.toLowerCase()} in ${block.table}`}>
+    <ChartCard
+      title={title}
+      subtitle={`${subtitle} · ${fmt(block.total_items)} ${itemLabel.toLowerCase()} in ${block.table}. Click a number to see the list.`}
+      right={<FullListLink to={{ list }} label={`All ${fmt(block.total_items)} ${itemLabel.toLowerCase()}`} />}
+    >
       <SimpleBar
         data={chart}
         bars={[
@@ -66,8 +84,9 @@ export function RankingReport() {
   return (
     <ReportLayout
       title="Ranking Report"
-      subtitle="How location_master records are spread across City Rank 1-5 for every location type (same layout as the Ranking_Count sheet), plus the Top cities and Top categories rank lists. Rank 1 is the highest priority."
+      subtitle="How location_master records are spread across City Rank 1-5 for every location type (same layout as the Ranking_Count sheet and the Location Master Data Report), plus the Top cities and Top categories rank lists. Rank 1 is the highest priority."
       report={report}
+      actions={<FullListLink to={null} label="Compare with the Location Master Data Report" href="/data-enrichment/location-matching" />}
     >
       {(data) => {
         const lr = data.location_rank;
@@ -77,15 +96,36 @@ export function RankingReport() {
         const pivotColumns = lr
           ? [
               { key: "location_type", label: "Location Type", render: (r) => <span className="font-semibold">{r.location_type}</span> },
-              ...lr.columns.map((c) => ({ key: c, label: c, align: "right", render: (r) => fmt(r[c]) })),
-              { key: "total", label: "Total", align: "right", render: (r) => <span className="font-semibold">{fmt(r.total)}</span> },
+              ...lr.columns.map((c) => ({
+                key: c,
+                label: c,
+                align: "right",
+                render: (r) =>
+                  r[c] && r.location_type !== "(blank)" ? (
+                    <DrillLink to={{ list: "location", type: r.location_type, rank: rankParam(c) }} title={`List these ${fmt(r[c])} ${r.location_type} records`}>
+                      {fmt(r[c])}
+                    </DrillLink>
+                  ) : (
+                    fmt(r[c])
+                  ),
+              })),
+              {
+                key: "total",
+                label: "Total",
+                align: "right",
+                render: (r) => (
+                  <span className="font-semibold">
+                    {r.location_type !== "(blank)" ? <DrillLink to={{ list: "location", type: r.location_type }}>{fmt(r.total)}</DrillLink> : fmt(r.total)}
+                  </span>
+                ),
+              },
             ]
           : [];
         const footer = lr
           ? {
               location_type: "Total_Count",
-              ...Object.fromEntries(lr.columns.map((c) => [c, fmt(lr.totals[c])])),
-              total: fmt(lr.total_location_master),
+              ...Object.fromEntries(lr.columns.map((c) => [c, lr.totals[c] ? <DrillLink to={{ list: "location", rank: rankParam(c) }}>{fmt(lr.totals[c])}</DrillLink> : fmt(lr.totals[c])])),
+              total: <DrillLink to={{ list: "location" }}>{fmt(lr.total_location_master)}</DrillLink>,
             }
           : null;
 
@@ -100,7 +140,12 @@ export function RankingReport() {
 
             {lr && (
               <>
-                <ChartCard title="Location type × rank" subtitle={`Live from ${lr.table}.${lr.rank_column} - bottom row is the total for each rank`} className="mb-6">
+                <ChartCard
+                  title="Location type × rank"
+                  subtitle={`Live from ${lr.table}.${lr.rank_column} - bottom row is the total for each rank. Click any number to see the full list (e.g. City → Rank 1 shows every Rank 1 city).`}
+                  className="mb-6"
+                  right={<FullListLink to={{ list: "location" }} label="All locations" />}
+                >
                   <DataTable columns={pivotColumns} rows={lr.rows} footer={footer} filename="ranking_count" maxHeight={460} />
                 </ChartCard>
 
@@ -123,8 +168,8 @@ export function RankingReport() {
             )}
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-              <RankListCard title="Top cities rank" subtitle="Top_cities_rank grouped by city_rank" block={data.city_rank} itemLabel="Cities" />
-              <RankListCard title="Business category rank" subtitle="Top_categories_rank grouped by category_rank" block={data.category_rank} itemLabel="Categories" />
+              <RankListCard title="Top cities rank" subtitle="Top_cities_rank grouped by city_rank" block={data.city_rank} itemLabel="Cities" list="top_cities" />
+              <RankListCard title="Business category rank" subtitle="Top_categories_rank grouped by category_rank" block={data.category_rank} itemLabel="Categories" list="top_categories" />
             </div>
           </>
         );

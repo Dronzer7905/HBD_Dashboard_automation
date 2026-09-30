@@ -12,6 +12,10 @@ Endpoints (all under /api/data-enrichment):
     GET /categories            page_product_categories by level + parent-link health
     GET /products-by-platform  page_products by source marketplace
     GET /attributes            filled attribute values per attribute (Brand, MRP ...)
+    GET /raw-sources           the team's "Data enrichment tables" sheet, with live counts
+    GET /process               01 Final Data Enrichment Master Report - 12 steps with live evidence
+    GET /url-extraction        02 URL extraction system - url_extraction_master, live
+    GET /location-matching     03 + 04 location matching / ranking reports, re-checked live
 
 Uses the shared reports connection (utils/reports_db.py -> REPORTS_DB_URL),
 so it reads the PostgreSQL database where these tables live. Add
@@ -214,3 +218,30 @@ def get_products_by_platform():
 @data_enrichment_bp.route('/attributes', methods=['GET'])
 def get_attributes_report():
     return _respond("de:attributes", lambda: _payload(_attributes))
+
+
+# ─── team documentation reports (sheet + reports 01-04), see routes/enrichment_reports.py ───
+
+@data_enrichment_bp.route('/raw-sources', methods=['GET'])
+def get_raw_sources():
+    from routes.enrichment_reports import build_raw_sources
+    exact = request.args.get("exact", "false").lower() in ("1", "true", "yes")
+    return _respond(f"de:raw-sources:{exact}", lambda: build_raw_sources(exact))
+
+
+@data_enrichment_bp.route('/process', methods=['GET'])
+def get_process():
+    from routes.enrichment_reports import build_process
+    return _respond("de:process", build_process)
+
+
+@data_enrichment_bp.route('/url-extraction', methods=['GET'])
+def get_url_extraction():
+    from routes.enrichment_reports import build_url_extraction
+    return _respond("de:url-extraction", build_url_extraction)
+
+
+@data_enrichment_bp.route('/location-matching', methods=['GET'])
+def get_location_matching():
+    from routes.enrichment_reports import build_location_matching
+    return _respond("de:location-matching", build_location_matching)

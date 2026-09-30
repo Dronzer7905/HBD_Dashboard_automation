@@ -3,7 +3,7 @@ HBD Reports - live, read-only report endpoints for the "Reports" sidebar section
 
 Every number is calculated live from the database at request time (results are
 cached for a few minutes to protect the DB; add ?refresh=true to force a fresh
-pull). Nothing here writes to the database.
+pull).
 
 Endpoints (all under /api/hbd-reports):
     GET /health               which database the reports are reading, table count
@@ -13,6 +13,12 @@ Endpoints (all under /api/hbd-reports):
     GET /hierarchy            parent-child hierarchy health of the master lists
     GET /db-tables            every table: group, subgroup, columns, row count, remarks
     GET /hbd                  HBD documentation: 5-stage pipeline + targets vs live progress
+    GET /detail/<list>        detail report summary + counts per rank (city, area, state, ...)
+    GET /detail/<list>/rows   the full list behind the totals, filtered / sorted / paged
+    PUT /table-status/<table> save the team's Status / Done by / Remarks for one table
+
+The ONLY write anywhere is PUT /table-status, and it writes to its own small
+tracking table (hbd_report_table_status). Data tables are never modified.
 
 Connection settings: see utils/reports_db.py (REPORTS_DB_URL etc.).
 """
@@ -21,13 +27,16 @@ import re
 import traceback
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy import text
 
 from utils.reports_db import (
     cached,
     engine_source,
+    invalidate,
     now_iso,
     pct,
     report_connection,
+    report_write_connection,
     to_json_safe,
 )
 
@@ -390,6 +399,16 @@ def _is_flag(name, dtype):
     return dtype in FLAG_TYPES or n in FLAG_COLUMNS or n.startswith(("is_", "has_"))
 
 
+def _filled_cond(rc, name, dtype):
+    """SQL condition: this column has a real value (see rules above)."""
+    qc = rc.q(name)
+    txt = f"LOWER(TRIM({rc.as_text(qc)}))"
+    if _is_flag(name, dtype):
+        return f"{qc} IS NOT NULL AND {txt} <> ''"
+    placeholders = ", ".join(f"'{p}'" for p in PLACEHOLDERS)
+    return f"{qc} IS NOT NULL AND {txt} <> '' AND {txt} NOT IN ({placeholders})"
+
+
 def _classify(p):
     if p is None:
         return "Not Available"
@@ -411,21 +430,13 @@ def build_field_availability(table_param):
 
         cols = rc.columns(table)
         total = rc.safe("total rows", lambda: rc.scalar(f"SELECT COUNT(*) FROM {rc.q(table)}"), 0) or 0
-        placeholder_list = ", ".join(f"'{p}'" for p in PLACEHOLDERS)
-
         results = []
         # chunk columns so a very wide table never produces one enormous statement
         for start in range(0, len(cols), 60):
             chunk = cols[start:start + 60]
             exprs = []
             for i, (name, dtype) in enumerate(chunk):
-                qc = rc.q(name)
-                txt = f"LOWER(TRIM({rc.as_text(qc)}))"
-                if _is_flag(name, dtype):
-                    cond = f"{qc} IS NOT NULL AND {txt} <> ''"
-                else:
-                    cond = f"{qc} IS NOT NULL AND {txt} <> '' AND {txt} NOT IN ({placeholder_list})"
-                exprs.append(f"SUM(CASE WHEN {cond} THEN 1 ELSE 0 END) AS c{i}")
+                exprs.append(f"SUM(CASE WHEN {_filled_cond(rc, name, dtype)} THEN 1 ELSE 0 END) AS c{i}")
             counts = rc.safe(
                 f"fill counts (columns {start + 1}-{start + len(chunk)})",
                 lambda e=exprs: rc.rows(f"SELECT {', '.join(e)} FROM {rc.q(table)}")[0],
@@ -674,6 +685,13 @@ TABLE_GROUPS = {
     "product_attributes": ("product enrichment", "cityhangaround"),
 }
 
+# Raw tables from the Data Enrichment team's sheet (utils/enrichment_register.py)
+from utils.enrichment_register import RAW_SOURCES as _RAW_SOURCES, SOURCE_BY_TABLE as _SHEET  # noqa: E402
+
+for _s in _RAW_SOURCES:
+    for _c in _s["candidates"]:
+        TABLE_GROUPS.setdefault(_c.lower(), ("raw", _s["subgroup"]))
+
 PLATFORM_WORDS = ["amazon", "flipkart", "zepto", "blinkit", "bigbasket", "dmart", "jiomart", "jio_mart",
                   "indiamart", "justdial", "asklaila", "magicpin", "nearbuy", "pinda", "heyplaces",
                   "yellow_pages", "google_map", "shiksha", "schoolgis", "college_dunia", "freelisting"]
@@ -682,6 +700,7 @@ PLATFORM_WORDS = ["amazon", "flipkart", "zepto", "blinkit", "bigbasket", "dmart"
 KEYWORD_RULES = [
     ("backup", ["backup", "bk_", "_bak", "_old"]),
     ("cleaning-in-progress", ["tier1", "tier2", "tier3", "tier4", "tier5", "uncleaned", "staging", "temp_"]),
+    ("raw", ["raw_", "osm_", "geonames"]),
     ("ranking", ["rank"]),
     ("system/etl", ["_log", "log_", "etl", "registry", "summary", "report", "task", "milestone",
                     "review", "aggregate", "metadata", "dlq", "migration", "celery", "alembic"]),
@@ -698,6 +717,46 @@ KEYWORD_RULES = [
 ]
 
 EXACT_COUNT_LIMIT = 1_000_000  # tables estimated below this get an exact COUNT(*)
+
+# ── Completion status ──
+# Auto status comes from the live data:
+#   Empty    = 0 rows
+#   Partial  = has rows, but on average less than COMPLETE_FILL_PCT % of each column is filled
+#   Complete = has rows and columns are at least COMPLETE_FILL_PCT % filled on average
+# Fill % is measured on the first SAMPLE_ROWS rows so it stays fast on huge tables.
+# The team can override it (Complete / In progress / Not started) from the dashboard;
+# that is saved in STATUS_TABLE together with Done by and Remarks.
+COMPLETE_FILL_PCT = 75
+SAMPLE_ROWS = 5000
+STATUS_TABLE = "hbd_report_table_status"
+TEAM_STATUSES = ["Complete", "In progress", "Not started"]
+
+
+def _sample_fill(rc, table, cols, rel=None):
+    """Average fill % across columns (and count of fully empty columns) on a row sample.
+    rel = already-quoted "schema"."table" when the table is outside the default schema."""
+    cols = cols[:300]
+    if not cols:
+        return None, None
+    exprs = [f"SUM(CASE WHEN {_filled_cond(rc, c, dt)} THEN 1 ELSE 0 END) AS c{i}" for i, (c, dt) in enumerate(cols)]
+    row = rc.rows(
+        f"SELECT COUNT(*) AS n, {', '.join(exprs)} FROM (SELECT * FROM {rel or rc.q(table)} LIMIT {SAMPLE_ROWS}) s"
+    )[0]
+    n = int(row.get("n") or 0)
+    if not n:
+        return 0.0, len(cols)
+    per_col = [int(row.get(f"c{i}") or 0) * 100.0 / n for i in range(len(cols))]
+    return round(sum(per_col) / len(per_col), 1), sum(1 for p in per_col if p == 0)
+
+
+def _load_team_statuses(rc):
+    t = rc.find_table(STATUS_TABLE)
+    if not t:
+        return {}
+    rows = rc.rows(
+        f"SELECT table_name, team_status, done_by, remarks, updated_by, updated_at FROM {rc.q(t)}"
+    )
+    return {str(r["table_name"]).lower(): r for r in rows}
 
 
 def classify_table(name):
@@ -717,8 +776,12 @@ def build_db_tables(exact=False):
         estimates = rc.safe("row estimates", rc.estimated_counts, {}) or {}
         rc.set_timeout(60000 if exact else 20000)
 
+        team = rc.safe("team statuses", lambda: _load_team_statuses(rc), {}) or {}
+
         tables = []
         for name in sorted(rc.tables().values(), key=str.lower):
+            if name.lower() == STATUS_TABLE:
+                continue  # our own tracking table - not part of the data inventory
             est = estimates.get(name)
             count, count_type = None, "estimate"
             if exact or est is None or est < EXACT_COUNT_LIMIT:
@@ -736,11 +799,38 @@ def build_db_tables(exact=False):
                 remark = "Approximate row count (from database statistics)"
             else:
                 remark = ""
+            fill_pct = empty_cols = None
+            if count == 0:
+                auto_status = "Empty"
+            else:
+                fill = rc.safe(f"fill sample {name}",
+                               lambda n=name: _sample_fill(rc, n, cols_by_table.get(n, [])), (None, None))
+                fill_pct, empty_cols = fill
+                if fill_pct is None:
+                    auto_status = "Unknown"
+                else:
+                    auto_status = "Complete" if fill_pct >= COMPLETE_FILL_PCT else "Partial"
+            ts = team.get(name.lower(), {})
+            team_status = ts.get("team_status") or None
+            sheet = _SHEET.get(name.lower(), {})
             tables.append({
                 "group": group, "subgroup": subgroup, "table": name, "classified_by": how,
                 "columns_count": len(cols), "columns": cols,
                 "detail": f"{len(cols)} columns: " + ", ".join(cols[:8]) + (", ..." if len(cols) > 8 else ""),
                 "rows": count, "count_type": count_type, "remarks": remark,
+                "fill_pct": fill_pct, "empty_columns": empty_cols,
+                "auto_status": auto_status,
+                "team_status": team_status,
+                "status": team_status or auto_status,
+                "done_by": ts.get("done_by") or "",
+                "team_remarks": ts.get("remarks") or "",
+                "updated_by": ts.get("updated_by") or "",
+                "updated_at": ts.get("updated_at"),
+                # what the Data Enrichment sheet says about this table (shown when the team has not set its own)
+                "sheet_detail": sheet.get("detail") or "",
+                "sheet_done_by": sheet.get("done_by") or "",
+                "sheet_remarks": sheet.get("sheet_remarks") or "",
+                "sheet_count": sheet.get("sheet_count"),
             })
         errors = rc.errors
 
@@ -762,6 +852,14 @@ def build_db_tables(exact=False):
                 "empty_tables": sum(1 for t in tables if t["rows"] == 0),
                 "approximate_counts": sum(1 for t in tables if t["count_type"] == "estimate"),
             },
+            "status_summary": [
+                {"name": st, "value": sum(1 for t in tables if t["status"] == st)}
+                for st in ["Complete", "Partial", "In progress", "Not started", "Empty", "Unknown"]
+                if any(t["status"] == st for t in tables)
+            ],
+            "complete_fill_pct": COMPLETE_FILL_PCT,
+            "sample_rows": SAMPLE_ROWS,
+            "team_statuses": TEAM_STATUSES,
         },
         "errors": errors,
         "generated_at": now_iso(),
@@ -772,6 +870,88 @@ def build_db_tables(exact=False):
 def db_tables():
     exact = request.args.get("exact", "false").lower() in ("1", "true", "yes")
     return _respond(f"db-tables:{exact}", lambda: build_db_tables(exact), ttl=600)
+
+
+def _ensure_status_table(rc):
+    if rc.is_pg:
+        ddl = f"""CREATE TABLE IF NOT EXISTS {rc.q(STATUS_TABLE)} (
+            id SERIAL PRIMARY KEY,
+            table_name VARCHAR(255) NOT NULL UNIQUE,
+            team_status VARCHAR(30),
+            done_by VARCHAR(255),
+            remarks TEXT,
+            updated_by VARCHAR(255),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    else:
+        ddl = f"""CREATE TABLE IF NOT EXISTS {rc.q(STATUS_TABLE)} (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            table_name VARCHAR(255) NOT NULL UNIQUE,
+            team_status VARCHAR(30),
+            done_by VARCHAR(255),
+            remarks TEXT,
+            updated_by VARCHAR(255),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    rc.conn.execute(text(ddl))
+
+
+def _current_user():
+    try:
+        from flask_jwt_extended import get_jwt, get_jwt_identity
+        claims = get_jwt() or {}
+        who = claims.get("email") or claims.get("username") or get_jwt_identity()
+        return str(who)[:255] if who is not None else ""
+    except Exception:  # noqa: BLE001 - no token context (e.g. local tests)
+        return ""
+
+
+@hbd_reports_bp.route("/table-status/<table_name>", methods=["PUT", "POST"])
+def save_table_status(table_name):
+    """Save the team's Status / Done by / Remarks for one table. Empty values clear the override."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", table_name or ""):
+        return jsonify({"status": "error", "message": "invalid table name"}), 400
+    body = request.get_json(silent=True) or {}
+    team_status = str(body.get("team_status") or "").strip()
+    done_by = str(body.get("done_by") or "").strip()[:255]
+    remarks = str(body.get("remarks") or "").strip()[:2000]
+    if team_status and team_status not in TEAM_STATUSES:
+        return jsonify({"status": "error",
+                        "message": f"team_status must be one of {', '.join(TEAM_STATUSES)} or empty"}), 400
+    try:
+        with report_write_connection(timeout_ms=15000) as rc:
+            real = rc.find_table(table_name)
+            if not real or real.lower() == STATUS_TABLE:
+                return jsonify({"status": "error", "message": f"table {table_name} not found"}), 404
+            _ensure_status_table(rc)
+            q = rc.q(STATUS_TABLE)
+            params = {"n": real, "s": team_status or None, "d": done_by or None,
+                      "r": remarks or None, "u": _current_user() or None}
+            if not (team_status or done_by or remarks):
+                rc.conn.execute(text(f"DELETE FROM {q} WHERE table_name = :n"), params)
+            elif rc.is_pg:
+                rc.conn.execute(text(
+                    f"INSERT INTO {q} (table_name, team_status, done_by, remarks, updated_by, updated_at) "
+                    f"VALUES (:n, :s, :d, :r, :u, CURRENT_TIMESTAMP) "
+                    f"ON CONFLICT (table_name) DO UPDATE SET team_status = EXCLUDED.team_status, "
+                    f"done_by = EXCLUDED.done_by, remarks = EXCLUDED.remarks, "
+                    f"updated_by = EXCLUDED.updated_by, updated_at = CURRENT_TIMESTAMP"), params)
+            else:
+                rc.conn.execute(text(
+                    f"INSERT INTO {q} (table_name, team_status, done_by, remarks, updated_by, updated_at) "
+                    f"VALUES (:n, :s, :d, :r, :u, CURRENT_TIMESTAMP) "
+                    f"ON DUPLICATE KEY UPDATE team_status = VALUES(team_status), done_by = VALUES(done_by), "
+                    f"remarks = VALUES(remarks), updated_by = VALUES(updated_by), "
+                    f"updated_at = CURRENT_TIMESTAMP"), params)
+        invalidate("db-tables:", "hbd")
+        return jsonify(to_json_safe({"status": "success", "data": {
+            "table": real, "team_status": team_status or None, "done_by": done_by,
+            "team_remarks": remarks, "updated_by": params["u"] or "", "updated_at": now_iso(),
+        }})), 200
+    except Exception as e:  # noqa: BLE001
+        print(f"[hbd_reports] save table status failed: {traceback.format_exc()}")
+        msg = str(getattr(e, "orig", e)).strip().splitlines()[0][:500]
+        return jsonify({"status": "error", "message": msg}), 500
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -906,7 +1086,492 @@ def hbd():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 7. HEALTH - which database are the reports reading?
+# 7. DETAIL REPORT - the full list behind every number
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The Count / Ranking reports show totals ("Rank 1 has 120 cities"). This is
+# the list behind those totals: every row of a master list with its parent
+# (state / city / parent category), rank, and how many records in the data
+# carry that name. Filters, sorting and paging all run in the database, so it
+# works on lists with lakhs of rows.
+#
+# "Records in data" = rows of the data table (master_table / product_master)
+# whose value equals this master name, ignoring case and extra spaces - the
+# same matching the Count report uses for Matched / Pending. Two masters with
+# the same name (e.g. two cities called "Aurangabad") share the same count,
+# because the data only has the name.
+
+DETAIL_DATASETS = [
+    {
+        "key": "city", "label": "City", "group": "Master lists",
+        "masters": [
+            {"table": "location_master", "level": 3, "name_cols": ["name"],
+             "parent": {"self": True, "fk": ["parent_id"], "label": "State"}},
+            {"table": "cities", "name_cols": ["city_name", "name"],
+             "parent": {"table": "State_Master", "fk": ["state_id"], "id": ["state_id", "id"],
+                        "name_cols": ["state_name", "name"], "label": "State"}},
+        ],
+        "rank_cols": ["city_rank", "rank", "location_rank"],
+        "records": {"data": {"table": "master_table", "cols": ["city"]}},
+    },
+    {
+        "key": "area", "label": "Area", "group": "Master lists",
+        "masters": [
+            {"table": "location_master", "level": 4, "name_cols": ["name"],
+             "parent": {"self": True, "fk": ["parent_id"], "label": "City"}},
+            {"table": "areas", "name_cols": ["area_name", "name"],
+             "parent": {"table": "cities", "fk": ["city_id"], "id": ["id"],
+                        "name_cols": ["city_name", "name"], "label": "City"}},
+        ],
+        "rank_cols": ["city_rank", "rank", "location_rank"],
+        "records": {"data": {"table": "master_table", "cols": ["area"]}},
+    },
+    {
+        "key": "state", "label": "State", "group": "Master lists",
+        "masters": [
+            {"table": "State_Master", "name_cols": ["state_name", "name"],
+             "parent": {"table": "countries", "fk": ["country_id"], "id": ["id", "country_id"],
+                        "name_cols": ["country_name", "name"], "label": "Country"}},
+        ],
+        "records": {"data": {"table": "master_table", "cols": ["state"]}},
+    },
+    {
+        "key": "country", "label": "Country", "group": "Master lists",
+        "masters": [{"table": "countries", "name_cols": ["country_name", "name"]}],
+        "records": {"data": {"table": "master_table", "cols": ["country"]}},
+    },
+    {
+        "key": "business_category", "label": "Business Category", "group": "Master lists",
+        "masters": [
+            {"table": "master_categories", "name_cols": ["name"],
+             "parent": {"self": True, "fk": ["parent_id"], "label": "Parent category"}},
+            {"table": "category_master", "name_cols": ["category_name", "name"]},
+        ],
+        "level_cols": ["level", "category_level"],
+        # rank comes from Top_categories_rank, matched by name
+        "rank_join": {"table": "Top_categories_rank", "name_cols": ["category_name", "name"],
+                      "rank_cols": ["category_rank", "rank"]},
+        "records": {"data": {"table": "master_table", "cols": ["business_category"]}},
+    },
+    {
+        "key": "product_category", "label": "Product Category", "group": "Master lists",
+        "masters": [
+            {"table": "product_category_master", "name_cols": ["category_name", "name"],
+             "parent": {"self": True, "fk": ["parent_id"], "label": "Parent category"}},
+        ],
+        "level_cols": ["category_level", "level"],
+        "records": {"data": {"table": "product_master", "cols": ["category_name", "category"]}},
+    },
+    {
+        "key": "pincode", "label": "Pincode", "group": "Master lists",
+        "masters": [
+            {"table": "pincode_master", "name_cols": ["pincode", "pin_code", "postal_code"]},
+            {"table": "location_postal_codes", "name_cols": ["postal_code", "pincode"]},
+        ],
+        "records": {"data": {"table": "master_table", "cols": ["pincode"], "exclude": ["0"]}},
+    },
+    {
+        "key": "location", "label": "All locations", "group": "Location master",
+        "masters": [
+            {"table": "location_master", "name_cols": ["name"],
+             "parent": {"self": True, "fk": ["parent_id"], "label": "Parent"}},
+        ],
+        "type_cols": ["location_type"],
+        "level_cols": ["location_level", "level"],
+        "rank_cols": ["city_rank", "rank", "location_rank"],
+        # each location is matched against the data column for its own type
+        "records": {"by_type": {"table": "master_table",
+                                "cols": {"country": "country", "state": "state", "city": "city", "area": "area"}}},
+    },
+    {
+        "key": "top_cities", "label": "Top cities rank", "group": "Rank tables",
+        "masters": [{"table": "Top_cities_rank", "name_cols": ["city_name", "name"],
+                     "parent": {"col": ["state_name", "state"], "label": "State"}}],
+        "rank_cols": ["city_rank", "rank"],
+        "records": {"own": ["business_count"], "label": "Business count"},
+    },
+    {
+        "key": "top_categories", "label": "Top categories rank", "group": "Rank tables",
+        "masters": [{"table": "Top_categories_rank", "name_cols": ["category_name", "name"]}],
+        "rank_cols": ["category_rank", "rank"],
+        "records": {"own": ["business_count"], "label": "Business count"},
+    },
+]
+DETAIL_BY_KEY = {d["key"]: d for d in DETAIL_DATASETS}
+DETAIL_MAX_PAGE = 500
+DETAIL_MAX_EXPORT = 100_000
+DETAIL_SORTS = {"name", "parent", "location_type", "level_value", "rank_value", "records"}
+NUMERIC_TYPES = {"integer", "bigint", "smallint", "numeric", "decimal", "int", "tinyint", "mediumint",
+                 "double precision", "real", "double", "float"}
+
+
+def _dtype(rc, table, col):
+    for c, dt in rc.columns(table):
+        if c == col:
+            return dt
+    return ""
+
+
+def _int_expr(rc, expr, dtype):
+    """Rank as a whole number, even when the column is stored as text."""
+    if dtype in NUMERIC_TYPES:
+        return expr
+    t = f"TRIM({rc.as_text(expr)})"
+    if rc.is_pg:
+        return f"CASE WHEN {t} ~ '^[0-9]+$' THEN CAST({t} AS INTEGER) END"
+    return f"CASE WHEN {t} REGEXP '^[0-9]+$' THEN CAST({t} AS SIGNED) END"
+
+
+def _norm(rc, expr):
+    return f"LOWER(TRIM({rc.as_text(expr)}))"
+
+
+def _resolve_detail(rc, spec):
+    """
+    Work out the SQL for one dataset against the real schema.
+    Returns dict(inner_sql, params, meta) or None when no master table exists.
+    inner_sql yields: id, name, parent, location_type, level_value, rank_value, records.
+    """
+    for m in spec["masters"]:
+        table = rc.find_table(m["table"])
+        if not table:
+            continue
+        name_col = rc.find_col(table, *m["name_cols"])
+        if not name_col:
+            continue
+        where, params = [], {}
+        if m.get("level") is not None:
+            lc = rc.find_col(table, "location_level", "level")
+            if not lc:
+                continue
+            where.append(f"m.{rc.q(lc)} = :base_lvl")
+            params["base_lvl"] = m["level"]
+        break
+    else:
+        return None
+
+    mname = f"m.{rc.q(name_col)}"
+    joins, ctes = [], []
+    meta = {
+        "key": spec["key"], "label": spec["label"], "group": spec["group"],
+        "master_source": table + (f" (level {m['level']})" if m.get("level") else ""),
+        "name_label": spec["label"] if spec["group"] != "Location master" else "Location",
+        "parent_label": None, "has_type": False, "has_level": False, "has_rank": False,
+        "rank_source": None, "records_label": "Records in data", "data_source": None,
+    }
+
+    id_col = rc.find_col(table, "id", "state_id", "location_id")
+    id_expr = f"m.{rc.q(id_col)}" if id_col else "NULL"
+
+    # ── parent ──
+    parent_expr = "NULL"
+    p = m.get("parent")
+    if p:
+        if p.get("col"):
+            pc = rc.find_col(table, *p["col"])
+            if pc:
+                parent_expr = f"m.{rc.q(pc)}"
+        else:
+            fk = rc.find_col(table, *p["fk"])
+            ptable = table if p.get("self") else rc.find_table(p["table"])
+            pid = rc.find_col(ptable, *(p.get("id") or ["id"])) if ptable else None
+            pname = (name_col if p.get("self") else rc.find_col(ptable, *p["name_cols"])) if ptable else None
+            if fk and ptable and pid and pname:
+                if _dtype(rc, table, fk) == _dtype(rc, ptable, pid):
+                    on = f"p.{rc.q(pid)} = m.{rc.q(fk)}"
+                else:
+                    on = f"{rc.as_text('p.' + rc.q(pid))} = {rc.as_text('m.' + rc.q(fk))}"
+                joins.append(f"LEFT JOIN {rc.q(ptable)} p ON {on}")
+                parent_expr = f"p.{rc.q(pname)}"
+        if parent_expr != "NULL":
+            meta["parent_label"] = p["label"]
+
+    # ── type / level ──
+    type_expr = "NULL"
+    tc = rc.find_col(table, *spec["type_cols"]) if spec.get("type_cols") else None
+    if tc:
+        type_expr = f"m.{rc.q(tc)}"
+        meta["has_type"] = True
+    level_expr = "NULL"
+    lc = rc.find_col(table, *spec["level_cols"]) if spec.get("level_cols") else None
+    if lc:
+        level_expr = _int_expr(rc, f"m.{rc.q(lc)}", _dtype(rc, table, lc))
+        meta["has_level"] = True
+
+    # ── rank ──
+    rank_expr = "NULL"
+    rcol = rc.find_col(table, *spec["rank_cols"]) if spec.get("rank_cols") else None
+    if rcol:
+        rank_expr = _int_expr(rc, f"m.{rc.q(rcol)}", _dtype(rc, table, rcol))
+        meta["rank_source"] = f"{table}.{rcol}"
+    elif spec.get("rank_join"):
+        rj = spec["rank_join"]
+        rt = rc.find_table(rj["table"])
+        rn = rc.find_col(rt, *rj["name_cols"]) if rt else None
+        rr = rc.find_col(rt, *rj["rank_cols"]) if rt else None
+        if rt and rn and rr:
+            rv = _int_expr(rc, rc.q(rr), _dtype(rc, rt, rr))
+            joins.append(
+                f"LEFT JOIN (SELECT {_norm(rc, rc.q(rn))} AS v, MIN({rv}) AS rk FROM {rc.q(rt)} "
+                f"GROUP BY {_norm(rc, rc.q(rn))}) r ON r.v = {_norm(rc, mname)}"
+            )
+            rank_expr = "r.rk"
+            meta["rank_source"] = f"{rt}.{rr} (matched by name)"
+    meta["has_rank"] = rank_expr != "NULL"
+
+    # ── records ──
+    rec = spec["records"]
+    records_expr = "0"
+    if rec.get("own"):
+        oc = rc.find_col(table, *rec["own"])
+        if oc:
+            records_expr = f"COALESCE(m.{rc.q(oc)}, 0)"
+            meta["data_source"] = f"{table}.{oc}"
+        meta["records_label"] = rec.get("label", "Records")
+    elif rec.get("data"):
+        d = rec["data"]
+        dt = rc.find_table(d["table"])
+        dc = rc.find_col(dt, *d["cols"]) if dt else None
+        if dt and dc:
+            qc = rc.q(dc)
+            ctes.append(
+                f"d AS (SELECT {_norm(rc, qc)} AS v, COUNT(*) AS n FROM {rc.q(dt)} "
+                f"WHERE {rc.not_blank(qc, d.get('exclude', ()))} GROUP BY {_norm(rc, qc)})"
+            )
+            joins.append(f"LEFT JOIN d ON d.v = {_norm(rc, mname)}")
+            records_expr = "COALESCE(d.n, 0)"
+            meta["data_source"] = f"{dt}.{dc}"
+    elif rec.get("by_type") and tc:
+        bt = rec["by_type"]
+        dt = rc.find_table(bt["table"])
+        parts = []
+        for kind, col in bt["cols"].items():
+            dc = rc.find_col(dt, col) if dt else None
+            if dc:
+                qc = rc.q(dc)
+                parts.append(
+                    f"SELECT '{kind}' AS k, {_norm(rc, qc)} AS v, COUNT(*) AS n FROM {rc.q(dt)} "
+                    f"WHERE {rc.not_blank(qc)} GROUP BY {_norm(rc, qc)}"
+                )
+        if parts:
+            ctes.append("d AS (" + " UNION ALL ".join(parts) + ")")
+            joins.append(f"LEFT JOIN d ON d.k = LOWER(TRIM({type_expr})) AND d.v = {_norm(rc, mname)}")
+            records_expr = "COALESCE(d.n, 0)"
+            meta["data_source"] = f"{dt} ({', '.join(bt['cols'].values())} - by location type)"
+
+    def build(records, js):
+        return (
+            f"SELECT {id_expr} AS id, {mname} AS name, {parent_expr} AS parent, {type_expr} AS location_type, "
+            f"{level_expr} AS level_value, {rank_expr} AS rank_value, {records} AS records "
+            f"FROM {rc.q(table)} m " + " ".join(js) +
+            (" WHERE " + " AND ".join(where) if where else "")
+        )
+
+    return {
+        "ctes": ctes, "inner": build(records_expr, joins), "params": params, "meta": meta,
+        # same rows without the record counts - for the dropdown choices (no scan of the data table)
+        "light": {"ctes": [], "inner": build("0", [j for j in joins if not j.startswith("LEFT JOIN d ")]),
+                  "params": params},
+    }
+
+
+def _detail_filters(rc, args, skip=()):
+    """WHERE conditions on the x.* columns from the query string."""
+    conds, params = [], {}
+
+    def s(name):
+        return (args.get(name) or "").strip()
+
+    if s("q") and "q" not in skip:
+        conds.append(f"LOWER({rc.as_text('x.name')}) LIKE :q")
+        params["q"] = f"%{s('q').lower()}%"
+    if s("parent") and "parent" not in skip:
+        if s("parent").lower() == "none":
+            conds.append("(x.parent IS NULL OR TRIM(" + rc.as_text("x.parent") + ") = '')")
+        else:
+            conds.append(f"LOWER({rc.as_text('x.parent')}) LIKE :parent")
+            params["parent"] = f"%{s('parent').lower()}%"
+    if s("type") and "type" not in skip:
+        conds.append(f"LOWER(TRIM({rc.as_text('x.location_type')})) = :ltype")
+        params["ltype"] = s("type").lower()
+    if s("level") and "level" not in skip and s("level").lstrip("-").isdigit():
+        conds.append("x.level_value = :lvl")
+        params["lvl"] = int(s("level"))
+    rank = s("rank").lower()
+    if rank and "rank" not in skip:
+        if rank in ("none", "unranked"):
+            conds.append("(x.rank_value IS NULL OR x.rank_value < 1)")
+        elif rank.endswith("+") and rank[:-1].isdigit():
+            conds.append("x.rank_value >= :rank_min")
+            params["rank_min"] = int(rank[:-1])
+        elif rank.isdigit():
+            conds.append("x.rank_value = :rank")
+            params["rank"] = int(rank)
+    status = s("status").lower()
+    if status and "status" not in skip:
+        if status in ("has_data", "matched", "done", "completed"):
+            conds.append("x.records > 0")
+        elif status in ("pending", "no_data", "missing"):
+            conds.append("x.records = 0")
+    for arg, op in (("min_records", ">="), ("max_records", "<=")):
+        if s(arg) and s(arg).isdigit():
+            conds.append(f"x.records {op} :{arg}")
+            params[arg] = int(s(arg))
+    return conds, params
+
+
+def _detail_sql(r, select, conds, tail=""):
+    ctes = ("WITH " + ", ".join(r["ctes"]) + " ") if r["ctes"] else ""
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    return f"{ctes}SELECT {select} FROM ({r['inner']}) x{where}{tail}"
+
+
+FILTER_ARGS = ("q", "parent", "type", "level", "rank", "status", "min_records", "max_records")
+
+
+def build_detail_summary(key, args):
+    spec = DETAIL_BY_KEY[key]
+    with report_connection(timeout_ms=120000) as rc:
+        r = _resolve_detail(rc, spec)
+        if not r:
+            return {"data": {"meta": {"key": key, "label": spec["label"], "available": False}},
+                    "errors": [{"step": spec["label"], "error": "master table not found in this database"}],
+                    "generated_at": now_iso()}
+        meta = dict(r["meta"], available=True)
+        conds, fparams = _detail_filters(rc, args)
+        params = dict(r["params"], **fparams)
+
+        summary = rc.safe(f"{spec['label']}: summary", lambda: rc.rows(_detail_sql(
+            r, "COUNT(*) AS total, SUM(CASE WHEN x.records > 0 THEN 1 ELSE 0 END) AS has_data, "
+               "COALESCE(SUM(x.records), 0) AS total_records", conds), params)[0], {})
+        total = int(summary.get("total") or 0)
+        has_data = int(summary.get("has_data") or 0)
+        summary = {"total": total, "has_data": has_data, "pending": total - has_data,
+                   "coverage_pct": pct(has_data, total), "total_records": summary.get("total_records") or 0}
+
+        # counts per rank with every filter except rank (so the table always shows all ranks)
+        by_rank = []
+        if meta["has_rank"]:
+            rconds, rparams = _detail_filters(rc, args, skip=("rank",))
+            raw = rc.safe(f"{spec['label']}: by rank", lambda: rc.rows(_detail_sql(
+                r, "x.rank_value AS rank_value, COUNT(*) AS total, "
+                   "SUM(CASE WHEN x.records > 0 THEN 1 ELSE 0 END) AS has_data, "
+                   "COALESCE(SUM(x.records), 0) AS records",
+                rconds, " GROUP BY x.rank_value ORDER BY x.rank_value"), dict(r["params"], **rparams)), [])
+            unranked = {"rank": None, "label": "Unranked", "total": 0, "has_data": 0, "records": 0}
+            for row in raw:
+                rk = _rank_key(row["rank_value"])
+                tot, hd = int(row["total"] or 0), int(row["has_data"] or 0)
+                if rk is None or rk < 1:
+                    unranked["total"] += tot
+                    unranked["has_data"] += hd
+                    unranked["records"] += int(row["records"] or 0)
+                else:
+                    by_rank.append({"rank": rk, "label": f"Rank {rk}", "total": tot, "has_data": hd,
+                                    "records": row["records"] or 0})
+            if unranked["total"]:
+                by_rank.append(unranked)
+            for b in by_rank:
+                b["pending"] = b["total"] - b["has_data"]
+                b["coverage_pct"] = pct(b["has_data"], b["total"])
+
+        # dropdown choices
+        options = {}
+        if meta["has_type"]:
+            options["type"] = [row["v"] for row in rc.safe("location types", lambda: rc.rows(
+                _detail_sql(r["light"], "DISTINCT x.location_type AS v", [], " ORDER BY 1"), r["params"]), [])
+                if row["v"] is not None]
+        if meta["has_level"]:
+            options["level"] = [row["v"] for row in rc.safe("levels", lambda: rc.rows(
+                _detail_sql(r["light"], "DISTINCT x.level_value AS v", [], " ORDER BY 1"), r["params"]), [])
+                if row["v"] is not None][:50]
+        errors = rc.errors
+    return {"data": {"meta": meta, "summary": summary, "by_rank": by_rank, "options": options},
+            "errors": errors, "generated_at": now_iso()}
+
+
+def build_detail_rows(key, args):
+    spec = DETAIL_BY_KEY[key]
+    export = (args.get("export") or "").lower() in ("1", "true", "yes")
+    try:
+        page = max(int(args.get("page") or 1), 1)
+    except ValueError:
+        page = 1
+    try:
+        size = int(args.get("page_size") or 50)
+    except ValueError:
+        size = 50
+    size = DETAIL_MAX_EXPORT if export else min(max(size, 1), DETAIL_MAX_PAGE)
+    offset = 0 if export else (page - 1) * size
+
+    sort = args.get("sort") or "name"
+    if sort == "rank":
+        sort = "rank_value"
+    if sort == "level":
+        sort = "level_value"
+    if sort == "type":
+        sort = "location_type"
+    if sort not in DETAIL_SORTS:
+        sort = "name"
+    direction = "DESC" if (args.get("dir") or "").lower() == "desc" else "ASC"
+
+    with report_connection(timeout_ms=120000) as rc:
+        r = _resolve_detail(rc, spec)
+        if not r:
+            return {"data": {"rows": [], "page": page, "page_size": size}, "errors": [], "generated_at": now_iso()}
+        conds, fparams = _detail_filters(rc, args)
+        params = dict(r["params"], **fparams, lim=size, off=offset)
+        # blanks always last, then a stable tie-break on name
+        order = (f" ORDER BY CASE WHEN x.{sort} IS NULL THEN 1 ELSE 0 END, x.{sort} {direction}, x.name ASC"
+                 f" LIMIT :lim OFFSET :off")
+        rows = rc.safe(f"{spec['label']}: rows", lambda: rc.rows(_detail_sql(
+            r, "x.id, x.name, x.parent, x.location_type, x.level_value, x.rank_value, x.records", conds, order),
+            params), [])
+        for row in rows:
+            row["rank"] = _rank_key(row.pop("rank_value"))
+            row["level"] = _rank_key(row.pop("level_value"))
+            row["status"] = "Has data" if (row["records"] or 0) > 0 else "Pending"
+        errors = rc.errors
+    return {"data": {"rows": rows, "page": page, "page_size": size, "sort": sort, "dir": direction.lower(),
+                     "export": export, "truncated": export and len(rows) >= DETAIL_MAX_EXPORT},
+            "errors": errors, "generated_at": now_iso()}
+
+
+def _args_key(args, names):
+    return "&".join(f"{n}={(args.get(n) or '').strip().lower()}" for n in names)
+
+
+@hbd_reports_bp.route("/detail", methods=["GET"])
+def detail_index():
+    """The datasets the Detail Report can show (no heavy queries)."""
+    return jsonify({"status": "success", "data": {"datasets": [
+        {"key": d["key"], "label": d["label"], "group": d["group"]} for d in DETAIL_DATASETS
+    ]}, "generated_at": now_iso()}), 200
+
+
+@hbd_reports_bp.route("/detail/<key>", methods=["GET"])
+def detail(key):
+    """
+    Summary + by-rank counts for the current filters:   GET /detail/city?rank=1&status=pending
+    One page of rows:                                    GET /detail/city/rows?rank=1&page=2&sort=records&dir=desc
+    """
+    if key not in DETAIL_BY_KEY:
+        return jsonify({"status": "error", "message": f"unknown list '{key}'"}), 404
+    args = request.args
+    return _respond(f"detail:{key}:{_args_key(args, FILTER_ARGS)}", lambda: build_detail_summary(key, args))
+
+
+@hbd_reports_bp.route("/detail/<key>/rows", methods=["GET"])
+def detail_rows(key):
+    if key not in DETAIL_BY_KEY:
+        return jsonify({"status": "error", "message": f"unknown list '{key}'"}), 404
+    args = request.args
+    names = FILTER_ARGS + ("page", "page_size", "sort", "dir", "export")
+    return _respond(f"detail-rows:{key}:{_args_key(args, names)}", lambda: build_detail_rows(key, args), ttl=180)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 8. HEALTH - which database are the reports reading?
 # ═════════════════════════════════════════════════════════════════════════════
 
 @hbd_reports_bp.route("/health", methods=["GET"])

@@ -1,7 +1,7 @@
 import React from "react";
 import { Typography } from "@material-tailwind/react";
 import {
-  useReport, ReportLayout, KpiCard, ChartCard, DataTable, StatusBadge, SimpleBar, SimplePie,
+  useReport, ReportLayout, KpiCard, ChartCard, DataTable, StatusBadge, SimpleBar, SimplePie, DrillLink,
   STATUS, SERIES, fmt, fmtPct,
 } from "./common/reportKit";
 
@@ -56,11 +56,26 @@ export function CountReport() {
             ),
             csv: (r) => r.label,
           },
-          { key: "master_count", label: "Total Master Count", align: "right", render: (r) => (r.master_count === null ? "Table missing" : fmt(r.master_count)) },
+          {
+            key: "master_count",
+            label: "Total Master Count",
+            align: "right",
+            render: (r) => (r.master_count === null ? "Table missing" : <DrillLink to={{ list: r.field }}>{fmt(r.master_count)}</DrillLink>),
+          },
           { key: "data_count", label: "Data Count (distinct)", align: "right", render: (r) => fmt(r.data_count) },
           { key: "coverage_pct", label: "Coverage %", align: "right", render: (r) => fmtPct(r.coverage_pct) },
-          { key: "matched", label: "Matched", align: "right", render: (r) => fmt(r.matched) },
-          { key: "pending", label: "Pending", align: "right", render: (r) => fmt(r.pending) },
+          {
+            key: "matched",
+            label: "Matched",
+            align: "right",
+            render: (r) => (r.master_count ? <DrillLink to={{ list: r.field, status: "has_data" }}>{fmt(r.matched)}</DrillLink> : fmt(r.matched)),
+          },
+          {
+            key: "pending",
+            label: "Pending",
+            align: "right",
+            render: (r) => (r.master_count ? <DrillLink to={{ list: r.field, status: "pending" }}>{fmt(r.pending)}</DrillLink> : fmt(r.pending)),
+          },
           {
             key: "remarks",
             label: "Remarks",
@@ -85,7 +100,7 @@ export function CountReport() {
               <KpiCard label="Fields needing work" value={rows.filter((r) => r.status !== "good").length} status="critical" sub="partial / very low coverage or missing master" />
             </div>
 
-            <ChartCard title="Count report" subtitle="Coverage % = Data Count ÷ Total Master Count. Pending = master entries with no matching data yet." className="mb-6">
+            <ChartCard title="Count report" subtitle="Coverage % = Data Count ÷ Total Master Count. Pending = master entries with no matching data yet. Click Master Count, Matched or Pending to see the full list of names." className="mb-6">
               <DataTable columns={columns} rows={rows} filename="count_report" maxHeight={640} />
             </ChartCard>
 
