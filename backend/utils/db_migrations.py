@@ -29,6 +29,9 @@ def ensure_ddl_schemas_exist(app):
     
     try:
         engine = db.engine
+        if "postgres" in str(engine.url).lower():
+            logger.info("⏩ PostgreSQL database detected: raw MySQL DDL schemas skipped.")
+            return
         with engine.connect() as conn:
             def table_exists(table_name):
                 check = text("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tname")
@@ -146,6 +149,9 @@ def run_pending_migrations(app):
         try:
             logger.info("🔄 Checking for pending DB migrations...")
             engine = db.engine
+            if "postgres" in str(engine.url).lower():
+                logger.info("⏩ PostgreSQL database detected: raw MySQL migrations skipped.")
+                return
             
             with engine.connect() as conn:
                 

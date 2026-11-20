@@ -2,40 +2,35 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 import os
-from dotenv import load_dotenv
+import sys
 
-# Load environment variables from .env file
-load_dotenv()
+# Ensure backend root is on sys.path
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from config import config
 
 # Base class for all models
 Base = declarative_base()
 
-# Database URL (MySQL) - Read from environment variables
-DB_HOST = os.getenv('DB_HOST')
-DB_USER = os.getenv('DB_USER')
-DB_PASSWORD = os.getenv('DB_PASSWORD')
-DB_NAME = os.getenv('DB_NAME')
-DB_PORT = os.getenv('DB_PORT')
+# Database URL and options from central config
+DATABASE_URL = config.SQLALCHEMY_DATABASE_URI
+engine_options = getattr(config, "SQLALCHEMY_ENGINE_OPTIONS", {
+    "pool_size": 10,
+    "max_overflow": 5,
+    "pool_recycle": 1800,
+    "pool_pre_ping": True,
+})
 
-print(f"DEBUG ENV -> HOST: {DB_HOST} USER: {DB_USER} PASS: {'*' * len(DB_PASSWORD or '')} DB: {DB_NAME}")
-
-import urllib.parse
-# Construct database URL dynamically from environment variables
-DATABASE_URL = (
-    f"mysql+pymysql://{DB_USER}:{urllib.parse.quote_plus(DB_PASSWORD or '')}"
-    f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+print(f"[Session] Initializing engine with: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL}")
 
 # Engine creation
 engine = create_engine(
     DATABASE_URL,
     echo=False,
     future=True,
-    pool_size=10,
-    max_overflow=5,
-    pool_timeout=30,
-    pool_pre_ping=True,    
-    pool_recycle=1800       
+    **engine_options
 )
 
 # Session Factory

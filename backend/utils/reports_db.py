@@ -44,9 +44,14 @@ _engine_lock = threading.Lock()
 
 def _build_url(which="reports"):
     if which == "enrichment" and os.getenv("ENRICHMENT_DB_URL"):
-        return os.getenv("ENRICHMENT_DB_URL"), "ENRICHMENT_DB_URL"
+        enrich_url = os.getenv("ENRICHMENT_DB_URL")
+        if enrich_url.startswith("postgresql://"):
+            enrich_url = enrich_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return enrich_url, "ENRICHMENT_DB_URL"
     url = os.getenv("REPORTS_DB_URL")
     if url:
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
         return url, "REPORTS_DB_URL"
 
     host = os.getenv("REPORTS_DB_HOST")

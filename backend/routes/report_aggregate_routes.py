@@ -12,6 +12,35 @@ import traceback
 report_aggregate_bp = Blueprint("report_aggregate", __name__)
 
 
+
+def _get_table_list(session):
+    try:
+        bind = session.get_bind()
+        if "postgres" in str(bind.url).lower():
+            return [r[0] for r in session.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")).fetchall()]
+        else:
+            return [r[0] for r in session.execute(text("SHOW TABLES")).fetchall()]
+    except Exception as e:
+        print(f"[WARN] Error listing tables: {e}")
+        return []
+
+def _get_table_columns(session, table_name):
+    try:
+        bind = session.get_bind()
+        if "postgres" in str(bind.url).lower():
+            return [r[0] for r in session.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='{table_name}'")).fetchall()]
+        else:
+            return [r[0] for r in session.execute(text(f"DESCRIBE `{table_name}`")).fetchall()]
+    except Exception as e:
+        print(f"[WARN] Error describing table {table_name}: {e}")
+        return []
+
+def _tbl_quote(session, table_name):
+    bind = session.get_bind()
+    if "postgres" in str(bind.url).lower():
+        return f'"{table_name}"'
+    return f'`{table_name}`'
+
 @report_aggregate_bp.route("/api/report/aggregate", methods=["GET"])
 def get_report_aggregate():
     """Main aggregate report endpoint — pulls data from remote DB tables."""
@@ -22,7 +51,8 @@ def get_report_aggregate():
     try:
         session = get_db_session()
         # Verify if local summary table exists
-        tables_res = session.execute(text("SHOW TABLES LIKE 'dashboard_summary'")).fetchone()
+        tables_list = _get_table_list(session)
+        tables_res = 'dashboard_summary' in [t.lower() for t in tables_list]
         if tables_res:
             print("[Report] Using Local Database (dashboard_summary found)")
             is_remote = False
@@ -43,13 +73,8 @@ def get_report_aggregate():
 
     try:
         # ─── Discover available tables ──────────────────────────────────
-        available_tables = []
-        try:
-            tables_result = session.execute(text("SHOW TABLES")).fetchall()
-            available_tables = [row[0] for row in tables_result]
-            print(f"[Report] Tables found: {available_tables}")
-        except Exception as e:
-            print(f"[WARN] Could not list tables: {e}")
+        available_tables = _get_table_list(session)
+        print(f"[Report] Tables found: {available_tables}")
 
         # ─── 1. Report Summary (from report_summery table) ───────────────
         summary = {}
@@ -58,7 +83,7 @@ def get_report_aggregate():
         
         if summary_table:
             try:
-                summary_rows = session.execute(text(f"SELECT * FROM `{summary_table}` ORDER BY id DESC")).fetchall()
+                summary_rows = session.execute(text(f"SELECT * FROM {_tbl_quote(session, summary_table)} ORDER BY id DESC")).fetchall()
                 if summary_rows:
                     first = dict(summary_rows[0]._mapping)
                     summary = {
@@ -100,7 +125,7 @@ def get_report_aggregate():
         if cities_table:
             try:
                 cities_rows = session.execute(
-                    text(f"SELECT * FROM `{cities_table}` ORDER BY 1")
+                    text(f"SELECT * FROM {_tbl_quote(session, cities_table)} ORDER BY 1")
                 ).fetchall()
                 for row in cities_rows:
                     d = dict(row._mapping)
@@ -119,12 +144,12 @@ def get_report_aggregate():
 
         # ─── 3. Top Categories (from top_categories or categories table) ─
         categories = []
-        cat_table = _find_table(available_tables, ["top_categories", "categories", "top_category", "category"])
+        cat_table = _find_table(available_tables, ["top_categories", "categories", "top_category", "category", "master_category_summary", "master_categories"])
         
         if cat_table:
             try:
                 cat_rows = session.execute(
-                    text(f"SELECT * FROM `{cat_table}` ORDER BY 1")
+                    text(f"SELECT * FROM {_tbl_quote(session, cat_table)} ORDER BY 1")
                 ).fetchall()
                 for row in cat_rows:
                     d = dict(row._mapping)
@@ -147,8 +172,8 @@ def get_report_aggregate():
         for tbl in [summary_table, cities_table, cat_table]:
             if tbl:
                 try:
-                    cols = session.execute(text(f"DESCRIBE `{tbl}`")).fetchall()
-                    schema_info[tbl] = [{"field": r[0], "type": str(r[1])} for r in cols]
+                    cols = _get_table_columns(session, tbl)
+                    schema_info[tbl] = [{"field": c, "type": "text"} for c in cols]
                 except Exception:
                     schema_info[tbl] = "could not describe"
 
@@ -158,14 +183,15 @@ def get_report_aggregate():
             # Check if table exists
             if _find_table(available_tables, ["top_cities_rank"]):
                 top_cities_rank_rows = session.execute(
-                    text("SELECT city_name, state_name, business_count, city_rank FROM `Top_cities_rank` ORDER BY city_rank ASC")
+                    text(f"SELECT * FROM {_tbl_quote(session, 'Top_cities_rank')} ORDER BY id ASC")
                 ).fetchall()
                 for row in top_cities_rank_rows:
+                    d = dict(row._mapping)
                     top_cities_business_data.append({
-                        "city_name": row[0],
-                        "state_name": row[1],
-                        "business_count": row[2],
-                        "city_rank": row[3]
+                        "city_name": d.get("city_name") or d.get("city") or "",
+                        "state_name": d.get("state_name") or d.get("state") or "",
+                        "business_count": d.get("business_count") or d.get("count") or 0,
+                        "city_rank": d.get("city_rank") or d.get("rank") or 0
                     })
         except Exception as e:
             print(f"[WARN] Error reading Top_cities_rank: {e}")
@@ -176,13 +202,14 @@ def get_report_aggregate():
             # Check if table exists
             if _find_table(available_tables, ["top_categories_rank"]):
                 top_categories_rank_rows = session.execute(
-                    text("SELECT category_name, category_rank, business_count FROM `Top_categories_rank` ORDER BY category_rank ASC")
+                    text(f"SELECT * FROM {_tbl_quote(session, 'Top_categories_rank')} ORDER BY id ASC")
                 ).fetchall()
                 for row in top_categories_rank_rows:
+                    d = dict(row._mapping)
                     top_categories_business_data.append({
-                        "category_name": row[0],
-                        "category_rank": row[1],
-                        "business_count": row[2]
+                        "category_name": d.get("category_name") or d.get("category") or "",
+                        "category_rank": d.get("category_rank") or d.get("rank") or 0,
+                        "business_count": d.get("business_count") or d.get("count") or 0
                     })
         except Exception as e:
             print(f"[WARN] Error reading Top_categories_rank: {e}")
@@ -303,8 +330,8 @@ def get_source_stats():
         ]
 
         # Discover tables in the database
-        tables_res = session.execute(text("SHOW TABLES")).fetchall()
-        db_tables = {row[0].lower(): row[0] for row in tables_res}
+        t_list = _get_table_list(session)
+        db_tables = {t.lower(): t for t in t_list}
 
         # Query recent additions from master_table grouped by source
         recent_7_by_source = {}
@@ -791,15 +818,15 @@ def get_source_analytics(source_id):
         session = get_db_session()
         
         # Check if table exists
-        tables_res = session.execute(text("SHOW TABLES")).fetchall()
-        db_tables = {row[0].lower() for row in tables_res}
+        t_list = _get_table_list(session)
+        db_tables = {t.lower() for t in t_list}
         if tbl.lower() not in db_tables:
             session.close()
             return jsonify({"status": "error", "message": f"Table {tbl} does not exist"}), 404
 
         # Describe table to inspect existing columns
-        cols_res = session.execute(text(f"DESCRIBE `{tbl}`")).fetchall()
-        cols = {r[0].lower() for r in cols_res}
+        c_list = _get_table_columns(session, tbl)
+        cols = {c.lower() for c in c_list}
 
         # Verify which columns actually exist in case of schema drift
         def col_exists(c):
@@ -1035,8 +1062,8 @@ def export_source_data(source_id):
     try:
         session = get_db_session()
         # Verify table exists
-        tables_res = session.execute(text("SHOW TABLES")).fetchall()
-        db_tables = {row[0].lower(): row[0] for row in tables_res}
+        t_list = _get_table_list(session)
+        db_tables = {t.lower(): t for t in t_list}
         if tbl.lower() not in db_tables:
             session.close()
             return jsonify({"status": "error", "message": f"Table {tbl} does not exist"}), 404

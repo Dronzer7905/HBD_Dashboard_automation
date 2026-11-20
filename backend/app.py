@@ -452,7 +452,7 @@ if __name__ == '__main__':
     # Run database migrations for local developer execution
     try:
         from utils.db_migrations import run_pending_migrations
-        print("🔄 Running Database Migrations (Local/Direct Run)...")
+        print("[MIGRATIONS] Running Database Migrations (Local/Direct Run)...")
         run_pending_migrations(app)
     except Exception as e:
         print(f"[WARNING] Local migrations check skipped: {e}")

@@ -8,19 +8,31 @@ load_dotenv(_env_path, override=False)
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")  
 
-    # --- Database configuration (FIXED for special characters) ---
+    # --- Database configuration (FIXED for special characters and drivers) ---
+    _explicit_db_uri = os.getenv('DATABASE_URL') or os.getenv('SQLALCHEMY_DATABASE_URI')
     DB_USER = os.getenv('DB_USER')
-    # Use quote_plus to handle '@' or other special chars in the password
-    DB_PASSWORD = urllib.parse.quote_plus(os.getenv('DB_PASSWORD', ''))
+    # Use unquote first then quote_plus to safely handle raw '@' and pre-encoded '%40'
+    DB_PASSWORD = urllib.parse.quote_plus(urllib.parse.unquote(os.getenv('DB_PASSWORD', '')))
     DB_HOST = os.getenv('DB_HOST')
     DB_PORT = os.getenv('DB_PORT', '3306')
     DB_NAME = os.getenv('DB_NAME')
 
-    # Determine connection string based on the port (5433 = PostgreSQL)
-    if str(DB_PORT) == '5433':
+    if _explicit_db_uri:
+        if _explicit_db_uri.startswith('postgresql://'):
+            _explicit_db_uri = _explicit_db_uri.replace('postgresql://', 'postgresql+psycopg2://', 1)
+        SQLALCHEMY_DATABASE_URI = _explicit_db_uri
+    elif str(DB_PORT) in ('5432', '5433', '15432') or 'postgres' in os.getenv('DB_DRIVER', '').lower() or os.getenv('DB_TYPE') == 'postgresql':
+        _ssl_suffix = '?sslmode=disable' if 'sslmode=disable' in os.getenv('DB_PARAMS', '') or os.getenv('DB_SSLMODE') == 'disable' else ''
         SQLALCHEMY_DATABASE_URI = (
-            f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+            f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}{_ssl_suffix}"
         )
+    else:
+        SQLALCHEMY_DATABASE_URI = (
+            f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        )
+
+    # Determine connection engine options based on dialect
+    if 'postgres' in SQLALCHEMY_DATABASE_URI.lower():
         SQLALCHEMY_ENGINE_OPTIONS = {
             "pool_size": 20,
             "max_overflow": 10,
@@ -31,9 +43,6 @@ class Config:
             }
         }
     else:
-        SQLALCHEMY_DATABASE_URI = (
-            f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-        )
         SQLALCHEMY_ENGINE_OPTIONS = {
             "pool_size": 20,
             "max_overflow": 10,
