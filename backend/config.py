@@ -96,5 +96,14 @@ class Config:
     ETL_VERSION = os.getenv("ETL_VERSION", "2.0.0")
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", "2000"))
 
+    # Explicit existing user IDs allowed to approve BG-1.11 mappings; deny by default.
+    MAPPING_APPROVER_IDS = os.getenv('MAPPING_APPROVER_IDS', '1,2,3,4')
+    MAPPING_ADMIN_IDS = os.getenv('MAPPING_ADMIN_IDS', '1,2,3,4')
+    MAPPING_POSTGRES_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_POSTGRES_ASSOCIATIONS_ENABLED', 'true').lower() == 'true'
+    MAPPING_DEPLOYMENT_ENV = os.getenv('MAPPING_DEPLOYMENT_ENV', 'staging')
+    MAPPING_POSTGRES_DATABASE = os.getenv('MAPPING_POSTGRES_DATABASE', 'testpostgrey')
+    # Provisional junction storage is opt-in and additionally restricted to SQLite.
+    MAPPING_LOCAL_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_LOCAL_ASSOCIATIONS_ENABLED', 'false').lower() == 'true'
+
 # Instantiate config for import convenience
 config = Config()

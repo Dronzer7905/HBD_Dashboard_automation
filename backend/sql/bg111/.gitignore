@@ -1,0 +1,2 @@
+# Reviewed BG-1.11 SQL sources are not database backups.
+!*.sql

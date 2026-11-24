@@ -65,7 +65,9 @@ export function Sidenav({ brandImg, brandName, routes }) {
   }, [location.pathname, routes]);
 
   const renderMenu = (items, level = 0, layout = "", parentPath = "") => {
-    return items.map((item) => {
+    return items
+      .filter((item) => !item.hidden)
+      .map((item) => {
       const isParent = item.children && item.children.length > 0;
       const isSecondLevel = level === 0;
       const isThirdLevel = level === 1;
