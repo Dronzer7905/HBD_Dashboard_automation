@@ -279,3 +279,71 @@ def approve_listing_products(listing_id):
     return jsonify(status='success', message=f'Products successfully approved for listing #{listing_id}')
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  BUSINESS CATEGORY TAXONOMY TREE & DYNAMIC CROSSWALK ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@mapping_bp.route('/taxonomy-tree', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_taxonomy_tree():
+    """Returns the dynamic hierarchical category tree with live listing counts & platforms."""
+    tree = bpm_service.get_taxonomy_tree()
+    return jsonify(status='success', data=tree)
+
+
+@mapping_bp.route('/taxonomy-tree/<int:category_id>', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_taxonomy_node(category_id):
+    """Returns detailed crosswalk studio data for a specific category node."""
+    marketplace = request.args.get('marketplace')
+    search = request.args.get('search')
+    page = query_integer('page', 1, 10_000)
+    limit = query_integer('limit', 20, 100)
+    data = bpm_service.get_taxonomy_node_details(
+        category_id=category_id, marketplace=marketplace, search=search, page=page, limit=limit
+    )
+    if not data:
+        return jsonify(status='error', message='Category not found'), 404
+    return jsonify(status='success', data=data)
+
+
+@mapping_bp.route('/taxonomy-tree/map', methods=['POST'])
+@jwt_required(locations=['headers'])
+@api_errors
+def map_taxonomy_node():
+    """1-Click dynamic mapping of a product category to a business category."""
+    identity = authorized_user('MAPPING_APPROVER_IDS')
+    data = body()
+    b_id = data.get('business_category_id')
+    p_id = data.get('product_category_id')
+    if not b_id or not p_id:
+        raise service.MappingError('business_category_id and product_category_id are required')
+    success, msg = bpm_service.map_taxonomy_product_category(
+        business_category_id=int(b_id), product_category_id=int(p_id), actor_id=identity
+    )
+    if not success:
+        return jsonify(status='error', message=msg), 400
+    return jsonify(status='success', message=msg)
+
+
+@mapping_bp.route('/taxonomy-tree/unmap', methods=['POST'])
+@jwt_required(locations=['headers'])
+@api_errors
+def unmap_taxonomy_node():
+    """1-Click dynamic unmapping of a product category association."""
+    identity = authorized_user('MAPPING_APPROVER_IDS')
+    data = body()
+    mapping_id = data.get('mapping_id')
+    if not mapping_id:
+        raise service.MappingError('mapping_id is required')
+    success, msg = bpm_service.unmap_taxonomy_product_category(
+        mapping_id=int(mapping_id), actor_id=identity
+    )
+    if not success:
+        return jsonify(status='error', message=msg), 400
+    return jsonify(status='success', message=msg)
+
+
+

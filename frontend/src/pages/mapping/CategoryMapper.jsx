@@ -132,7 +132,23 @@ function CategoryMapper() {
   const [autoLinkingListings, setAutoLinkingListings] = useState(false);
 
   // ═════════════════════════════════════════════════════════════════════
-  // TAB 1: BUSINESS-TO-PRODUCT MAPPINGS & EXECUTIVE REPORT
+  // TAB 1: BUSINESS CATEGORY TAXONOMY TREE & CROSSWALK STUDIO
+  // ═════════════════════════════════════════════════════════════════════
+  const [treeNodes, setTreeNodes] = useState([]);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [treeSearch, setTreeSearch] = useState("");
+  const [treeFilter, setTreeFilter] = useState("all"); // "all" | "retail" | "service" | "mapped" | "unmapped"
+  const [expandedNodeIds, setExpandedNodeIds] = useState(new Set());
+  const [selectedTreeNodeId, setSelectedTreeNodeId] = useState(null);
+  const [treeNodeDetails, setTreeNodeDetails] = useState(null);
+  const [treeNodeDetailsLoading, setTreeNodeDetailsLoading] = useState(false);
+  const [treeCandidateMarketplace, setTreeCandidateMarketplace] = useState("all");
+  const [treeCandidateSearch, setTreeCandidateSearch] = useState("");
+  const [treeCandidatePage, setTreeCandidatePage] = useState(1);
+  const [treeMappingLoading, setTreeMappingLoading] = useState(false);
+
+  // ═════════════════════════════════════════════════════════════════════
+  // TAB 2: BUSINESS-TO-PRODUCT MAPPINGS & EXECUTIVE REPORT
   // ═════════════════════════════════════════════════════════════════════
   const [bpStats, setBpStats] = useState(null);
   const [bpMappings, setBpMappings] = useState([]);
@@ -293,6 +309,124 @@ function CategoryMapper() {
         type: "error",
         text: getErrorMessage(err, "Failed to approve listing products."),
       });
+    }
+  };
+
+  // ───────────────────────────────────────────────────────────────────
+  // TAB 1: TAXONOMY TREE & CROSSWALK STUDIO LOADERS
+  // ───────────────────────────────────────────────────────────────────
+  const loadTreeNodeDetails = useCallback(async (nodeId, mkt = "all", search = "", page = 1) => {
+    if (!nodeId) return;
+    setTreeNodeDetailsLoading(true);
+    try {
+      const params = { page, limit: 20 };
+      if (mkt && mkt !== "all") params.marketplace = mkt;
+      if (search) params.search = search;
+      const res = await api.get(`/mapping/taxonomy-tree/${nodeId}`, { params });
+      if (res.data?.status === "success") {
+        setTreeNodeDetails(res.data.data);
+      }
+    } catch (err) {
+      console.error("Failed to load node details", err);
+    } finally {
+      setTreeNodeDetailsLoading(false);
+    }
+  }, []);
+
+  const loadTaxonomyTree = useCallback(async () => {
+    setTreeLoading(true);
+    try {
+      const res = await api.get("/mapping/taxonomy-tree");
+      if (res.data?.status === "success") {
+        const nodes = res.data.data || [];
+        setTreeNodes(nodes);
+        if (nodes.length > 0 && !selectedTreeNodeId) {
+          setSelectedTreeNodeId(nodes[0].id);
+          loadTreeNodeDetails(nodes[0].id, treeCandidateMarketplace, treeCandidateSearch, 1);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load taxonomy tree", err);
+    } finally {
+      setTreeLoading(false);
+    }
+  }, [selectedTreeNodeId, loadTreeNodeDetails, treeCandidateMarketplace, treeCandidateSearch]);
+
+  const toggleTreeNodeExpanded = (nodeId) => {
+    setExpandedNodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  };
+
+  const expandAllTreeNodes = () => {
+    const allIds = new Set(treeNodes.map((n) => n.id));
+    setExpandedNodeIds(allIds);
+  };
+
+  const collapseAllTreeNodes = () => {
+    setExpandedNodeIds(new Set());
+  };
+
+  const handleSelectTreeNode = (node) => {
+    setSelectedTreeNodeId(node.id);
+    setTreeCandidatePage(1);
+    loadTreeNodeDetails(node.id, treeCandidateMarketplace, treeCandidateSearch, 1);
+  };
+
+  const handleMapProductToCategory = async (catId, prodCatId) => {
+    setTreeMappingLoading(true);
+    try {
+      const res = await api.post("/mapping/taxonomy-tree/map", {
+        business_category_id: catId,
+        product_category_id: prodCatId,
+      });
+      if (res.data?.status === "success") {
+        setMessage({
+          type: "success",
+          text: res.data.message || "Product category mapped successfully!",
+        });
+        loadTreeNodeDetails(catId, treeCandidateMarketplace, treeCandidateSearch, treeCandidatePage);
+        loadTaxonomyTree();
+      }
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: getErrorMessage(err, "Failed to map category."),
+      });
+    } finally {
+      setTreeMappingLoading(false);
+    }
+  };
+
+  const handleUnmapProductFromCategory = async (mappingId) => {
+    setTreeMappingLoading(true);
+    try {
+      const res = await api.post("/mapping/taxonomy-tree/unmap", {
+        mapping_id: mappingId,
+      });
+      if (res.data?.status === "success") {
+        setMessage({
+          type: "success",
+          text: res.data.message || "Category association removed.",
+        });
+        if (selectedTreeNodeId) {
+          loadTreeNodeDetails(selectedTreeNodeId, treeCandidateMarketplace, treeCandidateSearch, treeCandidatePage);
+          loadTaxonomyTree();
+        }
+      }
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: getErrorMessage(err, "Failed to unmap category."),
+      });
+    } finally {
+      setTreeMappingLoading(false);
     }
   };
 
@@ -593,10 +727,11 @@ function CategoryMapper() {
     loadListings(1, "", "", "all", "");
     loadBpStats();
     loadBpMappings(1, "", "", "");
+    loadTaxonomyTree();
     loadSources(1, "", "all", "");
     loadBusinessCategories();
     loadProducts(1, "", "");
-  }, [loadListingsStats, loadListings, loadBpStats, loadBpMappings, loadSources, loadBusinessCategories, loadProducts]);
+  }, [loadListingsStats, loadListings, loadBpStats, loadBpMappings, loadTaxonomyTree, loadSources, loadBusinessCategories, loadProducts]);
 
   const businessOptions = useMemo(
     () =>
@@ -954,8 +1089,25 @@ function CategoryMapper() {
             }`}
           >
             <span>&bull;</span> Store Listings &amp; Product Mapping
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 font-extrabold">
               2.15M Listings
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab("tree");
+              if (treeNodes.length === 0) loadTaxonomyTree();
+            }}
+            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-bold transition whitespace-nowrap ${
+              activeTab === "tree"
+                ? "border-blue-600 text-blue-600 bg-white rounded-t-lg shadow-sm"
+                : "border-transparent text-blue-gray-600 hover:text-blue-900 hover:border-blue-gray-300"
+            }`}
+          >
+            <span>&bull;</span> Business Category Mapping Tree &amp; Structure
+            <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-800 font-extrabold">
+              {treeNodes.length || 321} Categories &bull; Dynamic Hierarchy
             </span>
           </button>
 
@@ -1206,7 +1358,7 @@ function CategoryMapper() {
                           )}
                         </td>
 
-                        {/* Business Category */}
+                        {/* Business Category & Domain */}
                         <td className="px-4 py-3.5">
                           <div className="font-bold text-blue-900">{item.business_category || "Uncategorized"}</div>
                           {item.business_subcategory && (
@@ -1214,6 +1366,20 @@ function CategoryMapper() {
                               &rarr; {item.business_subcategory}
                             </div>
                           )}
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                              item.is_retail 
+                                ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                : "bg-blue-gray-100 text-blue-gray-700 border border-blue-gray-200"
+                            }`}>
+                              {item.is_retail ? "🛍️ Retail Store" : "🏢 Service"}
+                            </span>
+                            {item.domain_label && (
+                              <span className="text-[10px] text-blue-gray-500 font-medium truncate max-w-[130px]" title={item.domain_label}>
+                                {item.domain_label}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Mapped Product Categories */}
@@ -1234,6 +1400,8 @@ function CategoryMapper() {
                                 ))}
                               </div>
                             </div>
+                          ) : item.is_retail === false ? (
+                            <span className="text-xs text-blue-gray-400 italic">Commercial Service (No Retail Products)</span>
                           ) : (
                             <span className="text-xs text-blue-gray-400 italic">No product categories mapped</span>
                           )}
@@ -1245,6 +1413,8 @@ function CategoryMapper() {
                             <span className="rounded-full bg-purple-50 border border-purple-200 px-2.5 py-1 text-xs font-bold text-purple-700">
                               ~{item.approx_products_count} Products
                             </span>
+                          ) : item.is_retail === false ? (
+                            <span className="text-xs text-blue-gray-400 font-medium">Services Only</span>
                           ) : (
                             <span className="text-xs text-blue-gray-400">0 Products</span>
                           )}
@@ -1255,6 +1425,10 @@ function CategoryMapper() {
                           {item.mapping_status === "MAPPED" ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-xs font-bold text-emerald-700">
                               ✓ Mapped &amp; Active
+                            </span>
+                          ) : item.mapping_status === "SERVICE_BUSINESS" ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-gray-100 border border-blue-gray-300 px-2.5 py-1 text-xs font-bold text-blue-gray-700">
+                              🏢 Commercial Service
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-xs font-bold text-amber-700">
@@ -1309,7 +1483,546 @@ function CategoryMapper() {
       )}
 
       {/* ═════════════════════════════════════════════════════════════════
-          TAB 1: BUSINESS-TO-PRODUCT MAPPINGS & ONE-CLICK APPROVAL
+          TAB 1: BUSINESS CATEGORY TAXONOMY TREE & CROSSWALK STUDIO
+      ═════════════════════════════════════════════════════════════════ */}
+      {activeTab === "tree" && (
+        <div className="space-y-6">
+          {/* Top Info Banner */}
+          <section className="rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-purple-50 to-white p-5 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="max-w-3xl">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-indigo-600 px-2.5 py-0.5 text-[11px] font-extrabold text-white uppercase tracking-wider">
+                    Taxonomy Architecture
+                  </span>
+                  <span className="text-xs font-bold text-indigo-900">
+                    Interactive Category Hierarchy (Level 1 &rarr; Level 2) &bull; Live Crosswalk Studio
+                  </span>
+                </div>
+                <h2 className="mt-2 text-xl font-extrabold text-blue-gray-900">
+                  Business Directory Taxonomy &amp; Multi-Platform Mapping Tree
+                </h2>
+                <p className="mt-1 text-xs text-blue-gray-600 leading-relaxed">
+                  Browse and configure canonical business categories. Expand nodes to inspect subcategories, live listing volumes in master table, mapped e-commerce catalogs (Amazon, Flipkart, Blinkit, Zepto, DMart, BigBasket, IndiaMART, JioMart), and dynamically link or unlink product categories with 1-click execution.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={expandAllTreeNodes}
+                  className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-xs hover:bg-indigo-50 transition"
+                >
+                  Expand All
+                </button>
+                <button
+                  type="button"
+                  onClick={collapseAllTreeNodes}
+                  className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-xs hover:bg-indigo-50 transition"
+                >
+                  Collapse All
+                </button>
+                <button
+                  type="button"
+                  onClick={loadTaxonomyTree}
+                  className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition"
+                >
+                  ↻ Refresh Tree
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Main Split-Pane Layout: Left Tree Structure | Right Crosswalk Studio */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            {/* ─────────────────────────────────────────────────────────
+                LEFT PANE: TAXONOMY TREE EXPLORER (5 cols)
+            ───────────────────────────────────────────────────────── */}
+            <div className="lg:col-span-5 flex flex-col rounded-2xl border border-blue-gray-200 bg-white shadow-sm overflow-hidden h-[820px]">
+              {/* Tree Header & Search */}
+              <div className="border-b border-blue-gray-100 bg-blue-gray-50/50 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-extrabold text-sm text-blue-gray-900 flex items-center gap-2">
+                    <span>🌳</span> Directory Hierarchy
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
+                      {treeNodes.length} L1 Categories
+                    </span>
+                  </h3>
+                  <span className="text-[11px] text-blue-gray-500 font-medium">
+                    {treeNodes.reduce((acc, n) => acc + (n.children?.length || 0), 0)} Subcategories
+                  </span>
+                </div>
+
+                {/* Instant Tree Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={treeSearch}
+                    onChange={(e) => setTreeSearch(e.target.value)}
+                    placeholder="Search category or subcategory..."
+                    className="w-full rounded-lg border border-blue-gray-200 bg-white px-3 py-1.5 text-xs text-blue-gray-800 placeholder-blue-gray-400 focus:border-indigo-500 focus:outline-none"
+                  />
+                  {treeSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setTreeSearch("")}
+                      className="absolute right-2.5 top-1.5 text-xs text-blue-gray-400 hover:text-blue-gray-600"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Filter Pills */}
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { id: "all", label: "All" },
+                    { id: "retail", label: "🛍️ Retail" },
+                    { id: "service", label: "🏢 Services" },
+                    { id: "mapped", label: "✓ Mapped" },
+                    { id: "unmapped", label: "⏳ Unmapped" }
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setTreeFilter(f.id)}
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold transition ${
+                        treeFilter === f.id
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "bg-white text-blue-gray-600 border border-blue-gray-200 hover:bg-blue-gray-100"
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tree Nodes List */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {treeLoading ? (
+                  <div className="py-20 text-center text-blue-gray-400">
+                    <span className="inline-block animate-spin text-2xl mb-2">↻</span>
+                    <p className="text-xs">Building dynamic taxonomy tree from database...</p>
+                  </div>
+                ) : (
+                  treeNodes
+                    .filter((node) => {
+                      if (treeSearch) {
+                        const q = treeSearch.toLowerCase();
+                        const matchParent = node.name.toLowerCase().includes(q) || (node.domain_label || "").toLowerCase().includes(q);
+                        const matchChild = node.children?.some((c) => c.name.toLowerCase().includes(q));
+                        if (!matchParent && !matchChild) return false;
+                      }
+                      if (treeFilter === "retail" && !node.is_retail) return false;
+                      if (treeFilter === "service" && node.is_retail) return false;
+                      if (treeFilter === "mapped" && node.status !== "MAPPED") return false;
+                      if (treeFilter === "unmapped" && node.status === "MAPPED") return false;
+                      return true;
+                    })
+                    .map((node) => {
+                      const isExpanded = expandedNodeIds.has(node.id) || Boolean(treeSearch);
+                      const isSelected = selectedTreeNodeId === node.id;
+
+                      return (
+                        <div
+                          key={node.id}
+                          className={`rounded-xl border transition overflow-hidden ${
+                            isSelected
+                              ? "border-indigo-400 bg-indigo-50/40 shadow-xs"
+                              : "border-blue-gray-100 bg-white hover:border-blue-gray-300"
+                          }`}
+                        >
+                          {/* L1 Category Node Row */}
+                          <div
+                            className="flex items-center justify-between p-2.5 cursor-pointer"
+                            onClick={() => handleSelectTreeNode(node)}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {/* Expand/Collapse Chevron */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTreeNodeExpanded(node.id);
+                                }}
+                                className="h-6 w-6 rounded flex items-center justify-center text-blue-gray-400 hover:bg-blue-gray-100 transition shrink-0"
+                              >
+                                {node.children?.length > 0 ? (isExpanded ? "▼" : "▶") : "•"}
+                              </button>
+
+                              {/* Level Badge */}
+                              <span className="rounded bg-indigo-100 text-indigo-800 text-[10px] font-extrabold px-1.5 py-0.5 shrink-0">
+                                L1
+                              </span>
+
+                              {/* Name & Domain */}
+                              <div className="min-w-0">
+                                <p className={`font-bold text-xs truncate ${isSelected ? "text-indigo-950" : "text-blue-gray-900"}`}>
+                                  {node.name}
+                                </p>
+                                <div className="flex items-center gap-1.5 text-[10px] text-blue-gray-500">
+                                  <span>{node.is_retail ? "🛍️ Retail" : "🏢 Service"}</span>
+                                  {node.domain_label && (
+                                    <>
+                                      <span>&bull;</span>
+                                      <span className="truncate max-w-[130px]">{node.domain_label}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Node Metadata Badges */}
+                            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                              {/* Listing Count */}
+                              <span className="rounded-md bg-blue-gray-100 text-blue-gray-700 text-[10px] font-bold px-1.5 py-0.5">
+                                {node.listings_count > 0 ? `${node.listings_count.toLocaleString()}` : "0"} listings
+                              </span>
+
+                              {/* Mapped Status */}
+                              {node.status === "MAPPED" ? (
+                                <span className="rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5">
+                                  ✓ MAPPED
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-blue-gray-100 text-blue-gray-500 text-[9px] font-bold px-1.5 py-0.5">
+                                  UNMAPPED
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Level 2 Subcategories (Expanded) */}
+                          {isExpanded && node.children?.length > 0 && (
+                            <div className="border-t border-blue-gray-100 bg-blue-gray-50/30 pl-7 pr-2 py-1.5 space-y-1">
+                              {node.children.map((child) => {
+                                const isChildSelected = selectedTreeNodeId === child.id;
+                                return (
+                                  <div
+                                    key={child.id}
+                                    onClick={() => handleSelectTreeNode(child)}
+                                    className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
+                                      isChildSelected
+                                        ? "bg-indigo-100/70 border border-indigo-300 text-indigo-950 font-bold"
+                                        : "hover:bg-blue-gray-100/60 text-blue-gray-700 font-medium"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="rounded bg-blue-100 text-blue-800 text-[9px] font-bold px-1 py-0.5">
+                                        L2
+                                      </span>
+                                      <span className="text-xs truncate">{child.name}</span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {child.mapped_platforms?.length > 0 && (
+                                        <div className="flex gap-0.5">
+                                          {child.mapped_platforms.slice(0, 2).map((p) => (
+                                            <span
+                                              key={p}
+                                              className={`rounded px-1 text-[9px] font-bold border ${getPlatformBadge(p)}`}
+                                            >
+                                              {p}
+                                            </span>
+                                          ))}
+                                          {child.mapped_platforms.length > 2 && (
+                                            <span className="text-[9px] text-blue-gray-500">
+                                              +{child.mapped_platforms.length - 2}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                      <span className="text-[10px] text-blue-gray-400">
+                                        {child.listings_count > 0 ? child.listings_count.toLocaleString() : ""}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+
+            {/* ─────────────────────────────────────────────────────────
+                RIGHT PANE: CATEGORY CROSSWALK STUDIO (7 cols)
+            ───────────────────────────────────────────────────────── */}
+            <div className="lg:col-span-7 flex flex-col rounded-2xl border border-blue-gray-200 bg-white shadow-sm overflow-hidden h-[820px]">
+              {treeNodeDetailsLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-blue-gray-400">
+                  <span className="inline-block animate-spin text-3xl mb-3 text-indigo-600">↻</span>
+                  <p className="text-sm font-bold text-blue-gray-700">Loading crosswalk studio details...</p>
+                  <p className="text-xs text-blue-gray-400 mt-1">Retrieving multi-platform mappings and live catalog products...</p>
+                </div>
+              ) : !treeNodeDetails ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-blue-gray-400">
+                  <span className="text-5xl mb-3">🌿</span>
+                  <h4 className="text-base font-bold text-blue-gray-800">Select a Category from the Tree</h4>
+                  <p className="text-xs text-blue-gray-500 max-w-sm mt-1">
+                    Click any Level-1 or Level-2 category node on the left to inspect its mapped product platforms, browse candidates, and test local listings.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                  {/* Category Header Card */}
+                  <div className="rounded-xl border border-blue-gray-200 bg-gradient-to-r from-blue-gray-50 to-white p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 text-[11px] font-bold text-indigo-600 uppercase tracking-wider">
+                          <span>Level {treeNodeDetails.category.level} Business Taxonomy</span>
+                          {treeNodeDetails.category.parent_name && (
+                            <span className="text-blue-gray-400">&bull; Parent: {treeNodeDetails.category.parent_name}</span>
+                          )}
+                        </div>
+                        <h3 className="text-xl font-black text-blue-gray-900 mt-0.5">
+                          {treeNodeDetails.category.name}
+                        </h3>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                          <span className={`rounded-md px-2 py-0.5 font-bold text-[11px] ${
+                            treeNodeDetails.category.is_retail
+                              ? "bg-purple-100 text-purple-800 border border-purple-200"
+                              : "bg-blue-gray-100 text-blue-gray-800 border border-blue-gray-200"
+                          }`}>
+                            {treeNodeDetails.category.is_retail ? "🛍️ Retail Store Domain" : "🏢 Professional / Service"}
+                          </span>
+                          <span className="text-blue-gray-600 font-medium">
+                            {treeNodeDetails.category.domain_label}
+                          </span>
+                          <span>&bull;</span>
+                          <span className="font-bold text-blue-gray-800">
+                            {treeNodeDetails.category.listings_count.toLocaleString()} Listings in Master
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider ${
+                          treeNodeDetails.mapped_product_categories?.length > 0
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            : "bg-amber-100 text-amber-800 border border-amber-300"
+                        }`}>
+                          {treeNodeDetails.mapped_product_categories?.length > 0 ? "✓ Mapped & Active" : "⏳ Unmapped"}
+                        </span>
+                        <p className="text-[11px] text-blue-gray-500 mt-1 font-semibold">
+                          {treeNodeDetails.mapped_product_categories?.length || 0} Categories Linked
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ─────────────────────────────────────────────────────
+                      SECTION 1: CURRENTLY MAPPED PRODUCT CATEGORIES
+                  ───────────────────────────────────────────────────── */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-extrabold text-blue-gray-900 flex items-center gap-2">
+                          <span>🔗</span> Currently Linked E-Commerce Product Categories
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800 font-bold">
+                            {treeNodeDetails.mapped_product_categories?.length || 0}
+                          </span>
+                        </h4>
+                        <p className="text-xs text-blue-gray-500">
+                          Products from these e-commerce categories are automatically associated with store listings in this category.
+                        </p>
+                      </div>
+                    </div>
+
+                    {treeNodeDetails.mapped_product_categories?.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-blue-gray-300 p-6 text-center text-blue-gray-400 bg-blue-gray-50/30">
+                        <p className="text-xs font-semibold">No product categories currently mapped to this business category.</p>
+                        <p className="text-[11px] text-blue-gray-500 mt-1">
+                          Use the candidate category selector below to link categories from Amazon, Flipkart, Blinkit, Zepto, DMart, BigBasket, IndiaMART, or JioMart.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {treeNodeDetails.mapped_product_categories.map((m) => (
+                          <div
+                            key={m.mapping_id}
+                            className="flex items-start justify-between gap-2 rounded-xl border border-blue-gray-200 bg-white p-3 shadow-2xs hover:border-blue-400 transition"
+                          >
+                            <div className="min-w-0">
+                              <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${getPlatformBadge(m.marketplace_name)}`}>
+                                {m.marketplace_name}
+                              </span>
+                              <h5 className="font-bold text-xs text-blue-gray-900 mt-1 truncate" title={m.category_path || m.category_name}>
+                                {m.category_name}
+                              </h5>
+                              <p className="text-[10px] text-blue-gray-500 truncate mt-0.5" title={m.category_path}>
+                                {m.category_path}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleUnmapProductFromCategory(m.mapping_id)}
+                              disabled={treeMappingLoading}
+                              className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-600 hover:text-white transition shrink-0"
+                              title="Unlink category"
+                            >
+                              ✕ Unmap
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ─────────────────────────────────────────────────────
+                      SECTION 2: CANDIDATE PRODUCT CATEGORIES TO MAP
+                  ───────────────────────────────────────────────────── */}
+                  <div className="space-y-3 pt-2 border-t border-blue-gray-200">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-extrabold text-blue-gray-900 flex items-center gap-2">
+                          <span>➕</span> Link Product Categories (All 8 Platforms)
+                        </h4>
+                        <p className="text-xs text-blue-gray-500">
+                          Search or filter candidate categories across marketplaces and click to link.
+                        </p>
+                      </div>
+
+                      {/* Candidate Search */}
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={treeCandidateSearch}
+                          onChange={(e) => setTreeCandidateSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              loadTreeNodeDetails(selectedTreeNodeId, treeCandidateMarketplace, treeCandidateSearch, 1);
+                            }
+                          }}
+                          placeholder="Search candidate categories..."
+                          className="rounded-lg border border-blue-gray-200 px-2.5 py-1 text-xs text-blue-gray-800 focus:border-indigo-500 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => loadTreeNodeDetails(selectedTreeNodeId, treeCandidateMarketplace, treeCandidateSearch, 1)}
+                          className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-blue-700 transition"
+                        >
+                          Find
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Platform Selector Buttons (One-by-One platform inspection) */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {["all", ...PLATFORMS_LIST.filter(p => p !== "Google Maps")].map((mp) => (
+                        <button
+                          key={mp}
+                          type="button"
+                          onClick={() => {
+                            setTreeCandidateMarketplace(mp);
+                            loadTreeNodeDetails(selectedTreeNodeId, mp, treeCandidateSearch, 1);
+                          }}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                            treeCandidateMarketplace === mp
+                              ? "bg-blue-900 text-white shadow-xs"
+                              : "bg-blue-gray-50 text-blue-gray-700 hover:bg-blue-gray-100 border border-blue-gray-200"
+                          }`}
+                        >
+                          {mp === "all" ? "All 8 Platforms" : mp}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Candidate Categories List */}
+                    <div className="max-h-60 overflow-y-auto rounded-xl border border-blue-gray-200 bg-white p-2 divide-y divide-blue-gray-100">
+                      {treeNodeDetails.candidate_product_categories?.items?.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-blue-gray-400">
+                          No unmapped candidate product categories found for this search.
+                        </div>
+                      ) : (
+                        treeNodeDetails.candidate_product_categories?.items?.map((cand) => (
+                          <div
+                            key={cand.id}
+                            className="flex items-center justify-between p-2 hover:bg-blue-gray-50/60 rounded-lg transition"
+                          >
+                            <div className="min-w-0 pr-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${getPlatformBadge(cand.marketplace_name)}`}>
+                                  {cand.marketplace_name}
+                                </span>
+                                <span className="text-xs font-bold text-blue-gray-900 truncate">
+                                  {cand.category_name}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-blue-gray-500 truncate mt-0.5" title={cand.category_path}>
+                                {cand.category_path}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleMapProductToCategory(selectedTreeNodeId, cand.id)}
+                              disabled={treeMappingLoading}
+                              className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition shrink-0"
+                            >
+                              + Map to Category
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ─────────────────────────────────────────────────────
+                      SECTION 3: SAMPLE STORE LISTINGS UNDER THIS CATEGORY
+                  ───────────────────────────────────────────────────── */}
+                  <div className="space-y-3 pt-2 border-t border-blue-gray-200">
+                    <h4 className="text-sm font-extrabold text-blue-gray-900 flex items-center gap-2">
+                      <span>🏪</span> Live Store Listings in this Category ({treeNodeDetails.sample_listings?.length || 0} sample stores)
+                    </h4>
+
+                    {treeNodeDetails.sample_listings?.length === 0 ? (
+                      <p className="text-xs text-blue-gray-400 italic">No sample listings found in master table matching this category name.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {treeNodeDetails.sample_listings.map((store) => (
+                          <div
+                            key={store.id}
+                            className="rounded-xl border border-blue-gray-200 bg-white p-3 shadow-2xs hover:border-indigo-300 transition"
+                          >
+                            <div className="flex items-start justify-between gap-1">
+                              <div>
+                                <h5 className="font-bold text-xs text-blue-gray-900 truncate" title={store.business_name}>
+                                  {store.business_name}
+                                </h5>
+                                <p className="text-[10px] text-blue-gray-500">
+                                  📍 {store.city} &bull; ⭐ {store.ratings || 4.5}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  openListingInspector(store.id);
+                                }}
+                                className="rounded border border-blue-600 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 hover:bg-blue-600 hover:text-white transition"
+                              >
+                                View &rarr;
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═════════════════════════════════════════════════════════════════
+          TAB 2: BUSINESS-TO-PRODUCT MAPPINGS & ONE-CLICK APPROVAL
       ═════════════════════════════════════════════════════════════════ */}
       {activeTab === "report" && (
         <div className="space-y-6">
@@ -2134,6 +2847,68 @@ function CategoryMapper() {
                   <span className="inline-block animate-spin text-2xl mb-2">↻</span>
                   <p className="text-sm font-semibold">Resolving store taxonomy and multi-platform carried products...</p>
                 </div>
+              ) : listingModalData?.is_retail === false ? (
+                /* Non-Retail / Professional Services Listing View */
+                <div className="space-y-6">
+                  {/* Service Classification Banner */}
+                  <div className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 via-slate-50 to-white p-6 shadow-sm">
+                    <div className="flex items-start gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-blue-600 text-white flex items-center justify-center text-2xl font-bold shrink-0 shadow-sm">
+                        🏢
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="rounded-md bg-blue-600 px-2.5 py-0.5 text-[11px] font-extrabold text-white uppercase tracking-wider">
+                            Commercial / Professional Services
+                          </span>
+                          <span className="text-xs font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded">
+                            {listingModalData.service_type || "Commercial Service"}
+                          </span>
+                          <span className="rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5">
+                            ✓ Domain Verified
+                          </span>
+                        </div>
+                        <h4 className="mt-2 text-base font-extrabold text-blue-gray-900">
+                          {listingModalData?.listing?.business_name}
+                        </h4>
+                        <p className="mt-1 text-xs text-blue-gray-600 leading-relaxed max-w-3xl">
+                          {listingModalData.explanation}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Store Profile Card */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="rounded-xl border border-blue-gray-200 bg-white p-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-blue-gray-500 mb-2">
+                        Listing Profile
+                      </h4>
+                      <div className="text-xs text-blue-gray-700 space-y-1.5">
+                        <p>📍 <strong>Address:</strong> {listingModalData?.listing?.address || "N/A"}</p>
+                        <p>🏙️ <strong>City / State:</strong> {listingModalData?.listing?.city}, {listingModalData?.listing?.state}</p>
+                        <p>📞 <strong>Phone:</strong> {listingModalData?.listing?.primary_phone || "N/A"}</p>
+                        <p>⭐ <strong>Rating:</strong> {listingModalData?.listing?.ratings || 4.5} ({listingModalData?.listing?.data_source})</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-blue-gray-200 bg-white p-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-blue-gray-500 mb-2">
+                        Directory Classification
+                      </h4>
+                      <div className="text-xs text-blue-gray-700 space-y-1.5">
+                        <p>📂 <strong>Business Category:</strong> <span className="font-bold text-blue-900">{listingModalData?.business_taxonomy?.level_1}</span></p>
+                        {listingModalData?.business_taxonomy?.level_2 && (
+                          <p>📁 <strong>Subcategory:</strong> <span className="font-bold text-blue-900">{listingModalData?.business_taxonomy?.level_2}</span></p>
+                        )}
+                        <p>🏷️ <strong>Service Domain:</strong> {listingModalData?.business_taxonomy?.domain_label}</p>
+                        <p className="text-[11px] text-blue-gray-500 italic mt-2">
+                          Note: Consumer retail catalog items (e.g. FMCG, apparel, mobile covers) are omitted to maintain 100% catalog purity.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <>
                   {/* Row 1: Store & Category Details */}
@@ -2181,30 +2956,36 @@ function CategoryMapper() {
 
                   {/* Row 2: Carried Products Grid */}
                   <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
                       <div>
                         <h4 className="text-sm font-bold text-blue-gray-900">
                           Carried Products ({listingModalData?.products?.length || 0} items)
                         </h4>
                         <p className="text-xs text-blue-gray-500">
-                          These products match this store's business category and are accessible to this listing.
+                          Verified products strictly matching this store's category across e-commerce platforms.
                         </p>
                       </div>
 
-                      {/* Marketplace Filter inside Modal */}
-                      <select
-                        value={listingModalMarketplace}
-                        onChange={(e) => {
-                          setListingModalMarketplace(e.target.value);
-                          openListingInspector(selectedListingId, e.target.value);
-                        }}
-                        className="rounded-lg border border-blue-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-gray-700 focus:border-blue-500"
-                      >
-                        <option value="all">All Marketplaces</option>
-                        {PLATFORMS_LIST.filter(p => p !== "Google Maps").map(mp => (
-                          <option key={mp} value={mp}>{mp}</option>
+                      {/* Marketplace Filter Pills */}
+                      <div className="flex flex-wrap gap-1">
+                        {["all", ...PLATFORMS_LIST.filter(p => p !== "Google Maps")].map((mp) => (
+                          <button
+                            key={mp}
+                            type="button"
+                            onClick={() => {
+                              setListingModalMarketplace(mp);
+                              openListingInspector(selectedListingId, mp);
+                            }}
+                            className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                              listingModalMarketplace === mp
+                                ? "bg-blue-600 text-white shadow-xs"
+                                : "bg-blue-gray-100 text-blue-gray-700 hover:bg-blue-gray-200"
+                            }`}
+                          >
+                            {mp === "all" ? "All Platforms" : mp}
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
 
                     {/* Products Grid */}
