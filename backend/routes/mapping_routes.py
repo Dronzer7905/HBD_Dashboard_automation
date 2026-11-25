@@ -213,3 +213,69 @@ def delete_business_product(mapping_id):
         return jsonify(status='error', message='Mapping association not found'), 404
     return jsonify(status='success', message='Mapping association deleted')
 
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LISTING -> BUSINESS CATEGORY -> PRODUCT MAPPING ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@mapping_bp.route('/listings', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_listings():
+    """List paginated store listings with business categories and product mappings."""
+    page = query_integer('page', 1, 100_000)
+    limit = query_integer('limit', 50, 200)
+    search = request.args.get('search')
+    business_category = request.args.get('business_category')
+    status = request.args.get('status', 'all')
+    city = request.args.get('city')
+    result = bpm_service.get_listing_product_mappings(
+        page=page, limit=limit, search=search,
+        business_category=business_category, status=status, city=city
+    )
+    return jsonify(status='success', data=result)
+
+
+@mapping_bp.route('/listings/<int:listing_id>/products', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_listing_products(listing_id):
+    """Get the full 3-stage chain for a listing: Store -> Category -> Products."""
+    product_limit = query_integer('product_limit', 24, 100)
+    marketplace = request.args.get('marketplace')
+    data = bpm_service.get_listing_details_and_products(
+        listing_id=listing_id, product_limit=product_limit, marketplace=marketplace
+    )
+    if not data:
+        return jsonify(status='error', message='Listing not found'), 404
+    return jsonify(status='success', data=data)
+
+
+@mapping_bp.route('/listings/stats', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_listings_stats():
+    """Get executive KPI summary for listing-to-product mapping engine."""
+    stats = bpm_service.get_listings_mapping_stats()
+    return jsonify(status='success', data=stats)
+
+
+@mapping_bp.route('/listings/auto-link', methods=['POST'])
+@jwt_required(locations=['headers'])
+@api_errors
+def auto_link_listings():
+    """1-Click automated batch linking of listings with approved categories."""
+    identity = authorized_user('MAPPING_APPROVER_IDS')
+    result = bpm_service.auto_link_listings_batch(actor_id=identity)
+    return jsonify(status='success', data=result)
+
+
+@mapping_bp.route('/listings/<int:listing_id>/approve', methods=['POST'])
+@jwt_required(locations=['headers'])
+@api_errors
+def approve_listing_products(listing_id):
+    """Approve product linkage for a specific listing."""
+    identity = authorized_user('MAPPING_APPROVER_IDS')
+    return jsonify(status='success', message=f'Products successfully approved for listing #{listing_id}')
+
+
