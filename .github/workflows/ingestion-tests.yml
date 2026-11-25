@@ -1,0 +1,38 @@
+name: Ingestion API checks
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'supervisord.conf'
+      - '.github/workflows/ingestion-tests.yml'
+  push:
+    branches: ['bhargav/BG-1.13-guided-ingestion']
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install isolated API test dependencies
+        run: >-
+          python -m pip install Flask Flask-SQLAlchemy Flask-JWT-Extended
+          flask-cors flask-mail flask-migrate celery redis psycopg2-binary
+          'openpyxl>=3.1.5,<4' 'defusedxml>=0.7.1,<1'
+      - name: SQLite mapping regressions
+        run: python -m unittest discover -s backend/tests -p 'test_mapping*.py' -q
+      - name: SQLite ingestion and actual Celery worker
+        run: python -m unittest discover -s backend/tests -p 'test_ingestion*.py' -q
+      - name: Owned PostgreSQL mapping integration
+        run: |
+          pg_config --version
+          python backend/tests/run_mapping_postgres.py --postgres-bin "$(pg_config --bindir)"
+      - name: Owned PostgreSQL ingestion integration
+        run: python backend/tests/run_ingestion_postgres.py --postgres-bin "$(pg_config --bindir)"

@@ -105,5 +105,14 @@ class Config:
     # Provisional junction storage is opt-in and additionally restricted to SQLite.
     MAPPING_LOCAL_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_LOCAL_ASSOCIATIONS_ENABLED', 'false').lower() == 'true'
 
+    # Web and workers must mount the same directory. No client-supplied paths.
+    INGESTION_UPLOAD_DIR = os.getenv('INGESTION_UPLOAD_DIR')
+    INGESTION_MAX_UPLOAD_BYTES = int(os.getenv('INGESTION_MAX_UPLOAD_BYTES', str(100 * 1024 * 1024)))
+    INGESTION_CHUNK_SIZE = min(int(os.getenv('INGESTION_CHUNK_SIZE', '2500')), 2500)
+    INGESTION_CHUNK_COOLDOWN = float(os.getenv('INGESTION_CHUNK_COOLDOWN', '0.25'))
+    SCHEDULER_OPERATOR_IDS = os.getenv('SCHEDULER_OPERATOR_IDS', '')
+    PIPELINE_STAGE_SOURCES = os.getenv('PIPELINE_STAGE_SOURCES')
+    PIPELINE_QUERY_TIMEOUT_MS = int(os.getenv('PIPELINE_QUERY_TIMEOUT_MS', '2000'))
+
 # Instantiate config for import convenience
 config = Config()
