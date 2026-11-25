@@ -6,10 +6,10 @@ import {
 /**
  * Reusable placeholder for sections that are under development.
  * Props:
- *   title    — the page name, e.g. "Dining Manager"
- *   section  — the parent section, e.g. "Commerce & Service Managers"
- *   taskId   — the sprint task ID, e.g. "AR-1.10"
- *   assignee — who owns this task, e.g. "Anusha Ronda"
+ *   title    - the page name, e.g. "Dining Manager"
+ *   section  - the parent section, e.g. "Commerce & Service Managers"
+ *   taskId   - the sprint task ID, e.g. "AR-1.10"
+ *   assignee - who owns this task, e.g. "Anusha Ronda"
  */
 export default function ComingSoon({
   title = "This Page",
