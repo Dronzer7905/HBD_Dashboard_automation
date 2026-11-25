@@ -1,0 +1,120 @@
+{
+  "task": "BG-1.11",
+  "date": "2026-11-24",
+  "base_commit": "fa346f041ed92990f8f58e91915757f93abfa808",
+  "tests": {
+    "sqlite_passed": 79,
+    "postgresql_passed": 27,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "scope": "Local review sources and operator-run nonproduction SQL; company inspection was read-only",
+  "files": [
+    {
+      "path": "backend/config.py",
+      "sha256": "6256b92ac273651aad7568ed790b253b2e2ac14748bee9b71e9493b4312f21e2",
+      "bytes": 4756
+    },
+    {
+      "path": "backend/routes/mapping_routes.py",
+      "sha256": "67ed1ad19f4152ebed412c705e471eb4e2039cbb9e945b2b2115a99001ac74ad",
+      "bytes": 6381
+    },
+    {
+      "path": "backend/services/mapping_service.py",
+      "sha256": "b9cacae7614d9a38d40cca11ec3d506399d3f1a35ed3b936e18e23dfd52bfd16",
+      "bytes": 30192
+    },
+    {
+      "path": "backend/tests/demo_mapping_api.py",
+      "sha256": "f40ee834acf1406b1b986426df0aa540d54c13ed49d565ec078b69695301bce0",
+      "bytes": 3412
+    },
+    {
+      "path": "backend/tests/test_mapping_api.py",
+      "sha256": "080a735f504a0b99b232f2f63aa0ab5122de3f55e7f9fd6b149009b5285e378e",
+      "bytes": 27122
+    },
+    {
+      "path": "docs/BG-1.11-HANDOVER.rst",
+      "sha256": "0bcadf8d5394d5a933a46b3d58960978a3e36eafd978a4874748c136759f791c",
+      "bytes": 16226
+    },
+    {
+      "path": "backend/model/business_product_category_mapping.py",
+      "sha256": "5d4ea75937b3bd67504b34dde2d6d1d692f6d92526dda89075073d316be1ba72",
+      "bytes": 5194
+    },
+    {
+      "path": "backend/model/product_category.py",
+      "sha256": "d00fe8e4f0b8b812adf299f532883b908b6ef9a43b23cbad864d68a8b92a827b",
+      "bytes": 1187
+    },
+    {
+      "path": "backend/services/mapping_schema.py",
+      "sha256": "20da5631a732e159e5006797b11748af06b0f790252637b65e172b541cfbe45f",
+      "bytes": 9118
+    },
+    {
+      "path": "backend/scripts/bg111_postgres.py",
+      "sha256": "08873a6616bb3a8715ab0e6480214fd96ee8247d4d5b934a0484557d4306c799",
+      "bytes": 5754
+    },
+    {
+      "path": "backend/sql/bg111/.gitignore",
+      "sha256": "26c0a7837b70be553c35d6a159c709a79b9bf6c57788b5c09f07d7e6ffe4b748",
+      "bytes": 66
+    },
+    {
+      "path": "backend/sql/bg111/001_create_relationships.sql",
+      "sha256": "ab095176e0a3b39d3e6fbbd157e60b599955c50112d8b30a764bb5a8a8832ed2",
+      "bytes": 7231
+    },
+    {
+      "path": "backend/sql/bg111/002_inspect_relationships.sql",
+      "sha256": "3924f869f13d472dd7c4b6433f46c0b289f8e0127ee19db5c2196424a9752137",
+      "bytes": 1525
+    },
+    {
+      "path": "backend/sql/bg111/003_application_permissions.sql",
+      "sha256": "b40a82825a960b669133eb90229093c40eaad06c57680247e8a200f3945321e5",
+      "bytes": 1540
+    },
+    {
+      "path": "backend/tests/test_mapping_local.py",
+      "sha256": "de0f841128750e9d488fff61a2afbb73a441195d7b5552713a431feff2adc629",
+      "bytes": 24466
+    },
+    {
+      "path": "backend/tests/test_bg111_postgres.py",
+      "sha256": "f2e5dc8162927c13313d57d730cd53a59ff9e1ddca0446f051f41cd7ae6e3c9b",
+      "bytes": 24929
+    },
+    {
+      "path": "backend/tests/run_mapping_postgres.py",
+      "sha256": "c44d9c32757c2b16deca421ce6e32a3356a967bfdbda06f5a6ba46ac8e71e853",
+      "bytes": 8133
+    },
+    {
+      "path": "docs/BG-1.11-SCHEMA-INSPECTION.rst",
+      "sha256": "a03a57079cf33a1dba40335534974cf0023efa62c5f8a5dcb28d4340bd8607ac",
+      "bytes": 8561
+    },
+    {
+      "path": "docs/BG-1.11-SCHEMA-METADATA.json",
+      "sha256": "871e1693a9e06b5ffd4ef9bad4fce181677649971ffe42a4de1ffd05c781f908",
+      "bytes": 40100
+    },
+    {
+      "path": "docs/BG-1.11-POSTGRES-RUNBOOK.rst",
+      "sha256": "656c45fc03625ae3163a9f2c8300118f15a85848eef9f201b79a97019561ca41",
+      "bytes": 11959
+    },
+    {
+      "path": "docs/BG-1.11-PR-UPDATE.txt",
+      "sha256": "a44d2171c8f88b4c42d7bc264e282bc39dd0e7f49039563cb781263fb6634114",
+      "bytes": 15099
+    }
+  ]
+}

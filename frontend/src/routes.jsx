@@ -13,11 +13,9 @@ import {
   DocumentTextIcon,
   ArrowUpTrayIcon,
   ChartBarIcon,
-  
 } from "@heroicons/react/24/solid";
 
-
-
+// --- Existing working components ---
 import MasterDataUploader from "./componunts/data import/MasterDataUploader";
 import MasterData from "./componunts/masterdata/Masterdata";
 import { Home } from "./pages/dashboard/home";
@@ -28,10 +26,8 @@ import UnmatchedDataReview from "./pages/dashboard/unmatched_data_review";
 import ZomatoData from "./componunts/product master data/ZomatoData";
 import CitiesReports from "./componunts/Reports/cities_reports";
 import CategoriesReports from "./componunts/Reports/categories_reports";
-
 import CitiesPendingReport from "./componunts/Reports/CitiesPendingReport";
 import CategoriesPendingReport from "./componunts/Reports/CategoriesPendingReport";
-
 import HeyPlacesData from "./componunts/Source Wise data/HeyPlacesData.jsx";
 import BankData from "./componunts/Source Wise data/BankData";
 import ProductCategory from "./componunts/masterdata/ProductCategory";
@@ -39,7 +35,7 @@ import ListingComplete from "./componunts/Source Wise data/ListingComplate";
 import ListingIncomplate from "./componunts/Source Wise data/ListingIncomplate";
 import ProductComplete from "./componunts/product master data/ProductComplate";
 import ProductIncomplate from "./componunts/product master data/ProductIncomplate";
-import AmazonData from "./componunts/product master data/AmazonData"; 
+import AmazonData from "./componunts/product master data/AmazonData";
 import FlipkartData from "./componunts/product master data/FlipkartData";
 import BigBasketData from "./componunts/product master data/BigBasket";
 import ServiceComplate from "./componunts/service master data/ServiceComplate";
@@ -94,7 +90,6 @@ import PostOfficeUploader from "./componunts/data import/listing import/PostOffi
 import ShikshaUploader from "./componunts/data import/listing import/ShikshaUploader";
 import DuplicateData from "./componunts/Source Wise data/DuplicateData";
 import ShikshaData from "./componunts/Source Wise data/ShikshaData";
-
 import IndiamartScrapper from "./componunts/scrapper/IndiamartScrapper";
 import BlinkitScrapper from "./componunts/scrapper/BlinkitScrapper";
 import ZeptoScrapper from "./componunts/scrapper/ZeptoScrapper";
@@ -119,11 +114,11 @@ import ZomatoUploader from "./componunts/data import/product import/ZomatoUpload
 import { SignIn } from "./pages/auth/sign-in";
 import { SignUp } from "./pages/auth/sign-up";
 import MasterDataDashboard from "./componunts/MasterDataDashboard";
-import { element } from "prop-types";
 import LocationMasterData from "./componunts/masterdata/LocationMasterData";
 import MasterCategoryManager from "./componunts/masterdata/MasterCategoryManager";
 import CategoryMappingDashboard from "./componunts/masterdata/CategoryMappingDashboard";
-// --- HBD Reports + Data Enrichment (live from the reports database) ---
+
+// --- HBD Reports + Data Enrichment ---
 import {
   DocumentChartBarIcon,
   PresentationChartLineIcon,
@@ -151,60 +146,108 @@ import EnrichmentProcess from "./componunts/Data Enrichment/EnrichmentProcess";
 import RawDataSources from "./componunts/Data Enrichment/RawDataSources";
 import UrlExtractionReport from "./componunts/Data Enrichment/UrlExtractionReport";
 import LocationMatchingReport from "./componunts/Data Enrichment/LocationMatchingReport";
-import { PresentationChartLineIcon as DeProcessIcon, ServerStackIcon as DeRawIcon, LinkIcon as DeUrlIcon, MapPinIcon as DeLocationIcon } from "@heroicons/react/24/solid";
+import {
+  PresentationChartLineIcon as DeProcessIcon,
+  ServerStackIcon as DeRawIcon,
+  LinkIcon as DeUrlIcon,
+  MapPinIcon as DeLocationIcon,
+} from "@heroicons/react/24/solid";
+
+// --- NEW Phase 1 Pages ---
+import CommandCenter from "./pages/admin/CommandCenter";
+import PipelineStatus from "./pages/reports/PipelineStatus";
+import GuidedIngestionWizard from "./pages/ingest/GuidedIngestionWizard";
+import ScraperScheduler from "./pages/ingest/ScraperScheduler";
+import CategoryMapper from "./pages/mapping/CategoryMapper";
+import AttributeStandardizer from "./pages/mapping/AttributeStandardizer";
+import DiningManager from "./pages/commerce/DiningManager";
+import QuickCommerceManager from "./pages/commerce/QuickCommerceManager";
+import ServicesManager from "./pages/commerce/ServicesManager";
+import HealthcareManager from "./pages/commerce/HealthcareManager";
+import TouristSpotsManager from "./pages/leisure/TouristSpotsManager";
+import ItinerariesManager from "./pages/leisure/ItinerariesManager";
+import HotelsManager from "./pages/leisure/HotelsManager";
+import PlayAreasManager from "./pages/leisure/PlayAreasManager";
+import HangoutHubsManager from "./pages/leisure/HangoutHubsManager";
+import NewsModeration from "./pages/content/NewsModeration";
+import CommunityChannels from "./pages/content/CommunityChannels";
+
 const icon = {
   className: "w-5 h-5 text-inherit",
 };
+
+/*
+ * =============================================================================
+ *  ROUTE ARCHITECTURE — 7-Section Enterprise Hierarchy
+ * =============================================================================
+ *
+ *  Section 1: DASHBOARD & OVERVIEW     (Home, Command Center, Reports)
+ *  Section 2: HBD ETL & PIPELINE       (Pipeline Status, HBD Reports, Data Enrichment)
+ *  Section 3: GUIDED DATA INGESTION    (Bulk Upload Wizard, Scraper Scheduler, Upload Data)
+ *  Section 4: CATEGORY & CATALOG MAP   (Category Mapping, Attributes, Unmatched Review, Master Data)
+ *  Section 5: COMMERCE & SERVICES      (Dining, Quick Commerce, Services, Healthcare)
+ *  Section 6: LEISURE & TOURISM        (Tourist Spots, Itineraries, Hotels, Play Areas, Hangout Hubs)
+ *  Section 7: LOCAL NEWS & COMMUNITY   (News Moderation, Community Channels)
+ *
+ *  + OPERATIONS (Legacy working screens kept intact: Source Wise, Product Master, Scrapers, etc.)
+ *  + Hidden routes (detail views, product/:asin, etc.)
+ * =============================================================================
+ */
 
 export const routes = [
   {
     layout: "dashboard",
     pages: [
+      // =====================================================================
+      // SECTION 1: DASHBOARD & OVERVIEW
+      // =====================================================================
       {
         icon: <HomeIcon {...icon} />,
-        name: "dashboard",
-        path: "/home",
-        element: <Home />,
+        name: "Dashboard & Overview",
+        children: [
+          {
+            icon: <HomeIcon {...icon} />,
+            name: "Home",
+            path: "/home",
+            element: <Home />,
+          },
+          {
+            icon: <ChartBarIcon {...icon} />,
+            name: "Command Center",
+            path: "/admin/command-center",
+            element: <CommandCenter />,
+          },
+          {
+            icon: <ChartBarIcon {...icon} />,
+            name: "Master Dashboard",
+            path: "/masterdata/dashboard",
+            element: <MasterDataDashboard />,
+          },
+          {
+            icon: <ChartBarIcon {...icon} />,
+            name: "Aggregate Report",
+            path: "/report-data",
+            element: <AggregateReport />,
+          },
+        ],
       },
+
+      // =====================================================================
+      // SECTION 2: HBD ETL & PIPELINE REPORTS
+      // =====================================================================
       {
-        path: "/listingdata-report",
-        element: <MisReportTable />,
-        hidden: true,
-      },
-      {
-        path: "/productdata-report/products/:asin",
-        element: <ProductDetails />,
-        hidden: true,
-      },
-      {
-        path: "/cities-report",
-        element: <CitiesReports />,
-        hidden: true,
-      },
-      {
-        path: "/categories-report",
-        element: <CategoriesReports />,
-        hidden: true,
-      },
-      // --- NEW ROUTES ADDED HERE ---
-      {
-        path: "/cities-pending-report",
-        element: <CitiesPendingReport />,
-        hidden: true,
-      },
-      {
-        path: "/categories-pending-report",
-        element: <CategoriesPendingReport />,
-        hidden: true,
-      },
-      // -----------------------------
-      {
-        icon: <HomeIcon {...icon} />,
-        name: "Data Report",
+        icon: <DocumentChartBarIcon {...icon} />,
+        name: "HBD ETL & Pipeline",
         children: [
           {
             icon: <ChartBarIcon {...icon} />,
-            name: "Listing data report",
+            name: "Pipeline Status",
+            path: "/reports/pipeline-status",
+            element: <PipelineStatus />,
+          },
+          {
+            icon: <ChartBarIcon {...icon} />,
+            name: "Listing Data Report",
             path: "/home2",
             element: <ReportDashboard />,
           },
@@ -214,148 +257,145 @@ export const routes = [
             path: "/productdata-report",
             element: <ProductDataReport />,
           },
-        ],
-      },
-      {
-        icon: <ChartBarIcon {...icon}/>,
-        name: "REPORT",
-        path: "/report-data",
-        element: <AggregateReport />,
-      }, 
-      {
-        icon: <ChartBarIcon {...icon}/>,
-        name: "Master Dashboard",
-        path: "/masterdata/dashboard",
-        element: <MasterDataDashboard />,
-      },
-      {
-        icon: <DocumentChartBarIcon {...icon} />,
-        name: "HBD Reports",
-        children: [
           {
-            icon: <Squares2X2Icon {...icon} />,
-            name: "Overview",
-            path: "/hbd-reports/overview",
-            element: <ReportsOverview />,
-          },
-          {
-            icon: <PresentationChartLineIcon {...icon} />,
-            name: "HBD Report",
-            path: "/hbd-reports/hbd",
-            element: <HbdReport />,
-          },
-          {
-            icon: <ChartPieIcon {...icon} />,
-            name: "Count Report",
-            path: "/hbd-reports/count",
-            element: <CountReport />,
-          },
-          {
-            icon: <TrophyIcon {...icon} />,
-            name: "Ranking Report",
-            path: "/hbd-reports/ranking",
-            element: <RankingReport />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Detail Report",
-            path: "/hbd-reports/detail",
-            element: <DetailReport />,
-          },
-          {
-            icon: <ListBulletIcon {...icon} />,
-            name: "Master Table Fields",
-            path: "/hbd-reports/field-availability",
-            element: <FieldAvailability />,
-          },
-          {
-            icon: <ShareIcon {...icon} />,
-            name: "Hierarchy Check",
-            path: "/hbd-reports/hierarchy",
-            element: <HierarchyReport />,
-          },
-          {
-            icon: <CircleStackIcon {...icon} />,
-            name: "Database Tables",
-            path: "/hbd-reports/db-tables",
-            element: <DatabaseTables />,
-          },
-          {
-            icon: <SparklesIcon {...icon} />,
-            name: "Data Enrichment",
+            icon: <DocumentChartBarIcon {...icon} />,
+            name: "HBD Reports",
             children: [
               {
-                icon: <DeProcessIcon {...icon} />,
-                name: "Master Report",
-                path: "/hbd-reports/data-enrichment/process",
-                element: <EnrichmentProcess />,
+                icon: <Squares2X2Icon {...icon} />,
+                name: "Overview",
+                path: "/hbd-reports/overview",
+                element: <ReportsOverview />,
               },
               {
-                icon: <DeRawIcon {...icon} />,
-                name: "Raw Data Sources",
-                path: "/hbd-reports/data-enrichment/raw-sources",
-                element: <RawDataSources />,
+                icon: <PresentationChartLineIcon {...icon} />,
+                name: "HBD Report",
+                path: "/hbd-reports/hbd",
+                element: <HbdReport />,
               },
               {
-                icon: <DeUrlIcon {...icon} />,
-                name: "URL Extraction",
-                path: "/hbd-reports/data-enrichment/url-extraction",
-                element: <UrlExtractionReport />,
+                icon: <ChartPieIcon {...icon} />,
+                name: "Count Report",
+                path: "/hbd-reports/count",
+                element: <CountReport />,
               },
               {
-                icon: <DeLocationIcon {...icon} />,
-                name: "Location Matching",
-                path: "/hbd-reports/data-enrichment/location-matching",
-                element: <LocationMatchingReport />,
-              },
-              {
-                icon: <RectangleStackIcon {...icon} />,
-                name: "All Product Tables",
-                path: "/hbd-reports/data-enrichment/all-tables",
-                element: <AllProductTables />,
+                icon: <TrophyIcon {...icon} />,
+                name: "Ranking Report",
+                path: "/hbd-reports/ranking",
+                element: <RankingReport />,
               },
               {
                 icon: <TableCellsIcon {...icon} />,
-                name: "Categories",
-                path: "/hbd-reports/data-enrichment/categories",
-                element: <CategoriesEnrichmentReport />,
-              },
-              {
-                icon: <ShoppingCartIcon {...icon} />,
-                name: "Products",
-                path: "/hbd-reports/data-enrichment/products",
-                element: <ProductsEnrichmentReport />,
+                name: "Detail Report",
+                path: "/hbd-reports/detail",
+                element: <DetailReport />,
               },
               {
                 icon: <ListBulletIcon {...icon} />,
-                name: "Attributes",
-                path: "/hbd-reports/data-enrichment/attributes",
-                element: <AttributesEnrichmentReport />,
+                name: "Master Table Fields",
+                path: "/hbd-reports/field-availability",
+                element: <FieldAvailability />,
+              },
+              {
+                icon: <ShareIcon {...icon} />,
+                name: "Hierarchy Check",
+                path: "/hbd-reports/hierarchy",
+                element: <HierarchyReport />,
+              },
+              {
+                icon: <CircleStackIcon {...icon} />,
+                name: "Database Tables",
+                path: "/hbd-reports/db-tables",
+                element: <DatabaseTables />,
+              },
+              {
+                icon: <SparklesIcon {...icon} />,
+                name: "Data Enrichment",
+                children: [
+                  {
+                    icon: <DeProcessIcon {...icon} />,
+                    name: "Master Report",
+                    path: "/hbd-reports/data-enrichment/process",
+                    element: <EnrichmentProcess />,
+                  },
+                  {
+                    icon: <DeRawIcon {...icon} />,
+                    name: "Raw Data Sources",
+                    path: "/hbd-reports/data-enrichment/raw-sources",
+                    element: <RawDataSources />,
+                  },
+                  {
+                    icon: <DeUrlIcon {...icon} />,
+                    name: "URL Extraction",
+                    path: "/hbd-reports/data-enrichment/url-extraction",
+                    element: <UrlExtractionReport />,
+                  },
+                  {
+                    icon: <DeLocationIcon {...icon} />,
+                    name: "Location Matching",
+                    path: "/hbd-reports/data-enrichment/location-matching",
+                    element: <LocationMatchingReport />,
+                  },
+                  {
+                    icon: <RectangleStackIcon {...icon} />,
+                    name: "All Product Tables",
+                    path: "/hbd-reports/data-enrichment/all-tables",
+                    element: <AllProductTables />,
+                  },
+                  {
+                    icon: <TableCellsIcon {...icon} />,
+                    name: "Categories",
+                    path: "/hbd-reports/data-enrichment/categories",
+                    element: <CategoriesEnrichmentReport />,
+                  },
+                  {
+                    icon: <ShoppingCartIcon {...icon} />,
+                    name: "Products",
+                    path: "/hbd-reports/data-enrichment/products",
+                    element: <ProductsEnrichmentReport />,
+                  },
+                  {
+                    icon: <ListBulletIcon {...icon} />,
+                    name: "Attributes",
+                    path: "/hbd-reports/data-enrichment/attributes",
+                    element: <AttributesEnrichmentReport />,
+                  },
+                ],
               },
             ],
           },
         ],
       },
-      // ... (Rest of your code remains unchanged)
-      {
-        icon: <MagnifyingGlassIcon {...icon} />,
-        name: "search Keyword",
-        path: "/search-keyword",
-        element: <SearchKeyword />,
-      },
+
+      // =====================================================================
+      // SECTION 3: GUIDED DATA INGESTION
+      // =====================================================================
       {
         icon: <ArrowUpTrayIcon {...icon} />,
-        name: "Upload Data",
+        name: "Guided Data Ingestion",
         children: [
           {
-            icon: <ServerStackIcon {...icon} />, 
+            icon: <ArrowUpTrayIcon {...icon} />,
+            name: "Bulk Upload Wizard",
+            path: "/ingest/bulk-upload",
+            element: <GuidedIngestionWizard />,
+          },
+          {
+            icon: <ServerStackIcon {...icon} />,
+            name: "Scraper Schedules",
+            path: "/ingest/scraper-schedules",
+            element: <ScraperScheduler />,
+          },
+          {
+            icon: <ServerStackIcon {...icon} />,
             name: "Master Data Uploader",
             path: "/data-imports/master-data-uploader",
             element: <MasterDataUploader />,
           },
           {
             icon: <ArrowUpTrayIcon {...icon} />,
-            name: "Listing Data",
+            name: "Listing Data Upload",
             children: [
               {
                 icon: <DocumentTextIcon {...icon} />,
@@ -446,12 +486,12 @@ export const routes = [
                 name: "Yellow Pages",
                 path: "/data-imports/listing-data/yellow-pages",
                 element: <YellowPagesUploader />,
-              }
+              },
             ],
           },
           {
             icon: <ArrowUpTrayIcon {...icon} />,
-            name: "Product Data",
+            name: "Product Data Upload",
             children: [
               {
                 icon: <DocumentTextIcon {...icon} />,
@@ -506,7 +546,7 @@ export const routes = [
                 name: "Zomato",
                 path: "/data-imports/product-data/zomato",
                 element: <ZomatoUploader />,
-              }
+              },
             ],
           },
           {
@@ -517,24 +557,175 @@ export const routes = [
           },
         ],
       },
+
+      // =====================================================================
+      // SECTION 4: CATEGORY & CATALOG MAPPING
+      // =====================================================================
+      {
+        icon: <Squares2X2Icon {...icon} />,
+        name: "Category & Catalog Mapping",
+        children: [
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Category Mapper",
+            path: "/mapping/categories",
+            element: <CategoryMapper />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Attribute Standardizer",
+            path: "/mapping/attributes",
+            element: <AttributeStandardizer />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Unmatched Data Review",
+            path: "/masterdata/unmatched-data-review",
+            element: <UnmatchedDataReview />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Master Categories",
+            path: "/masterdata/master-categories",
+            element: <MasterCategoryManager />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Category Mapping (Legacy)",
+            path: "/masterdata/category-mapping",
+            element: <CategoryMappingDashboard />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Listing Category",
+            path: "/masterdata/listing-category",
+            element: <ListingCategory />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Product Category",
+            path: "/masterdata/product-category",
+            element: <ProductCategory />,
+          },
+        ],
+      },
+
+      // =====================================================================
+      // SECTION 5: COMMERCE & SERVICE MANAGERS (Phase 1 — Placeholders)
+      // =====================================================================
+      {
+        icon: <ShoppingCartIcon {...icon} />,
+        name: "Commerce & Services",
+        children: [
+          {
+            icon: <ShoppingCartIcon {...icon} />,
+            name: "Dining Manager",
+            path: "/commerce/dining",
+            element: <DiningManager />,
+          },
+          {
+            icon: <ShoppingCartIcon {...icon} />,
+            name: "Quick Commerce",
+            path: "/commerce/quick-commerce",
+            element: <QuickCommerceManager />,
+          },
+          {
+            icon: <ShoppingCartIcon {...icon} />,
+            name: "Services Manager",
+            path: "/commerce/services",
+            element: <ServicesManager />,
+          },
+          {
+            icon: <ShoppingCartIcon {...icon} />,
+            name: "Healthcare Manager",
+            path: "/commerce/healthcare",
+            element: <HealthcareManager />,
+          },
+        ],
+      },
+
+      // =====================================================================
+      // SECTION 6: LEISURE & TOURISM MANAGERS (Phase 1 — Placeholders)
+      // =====================================================================
+      {
+        icon: <MapPinIcon {...icon} />,
+        name: "Leisure & Tourism",
+        children: [
+          {
+            icon: <MapPinIcon {...icon} />,
+            name: "Tourist Spots",
+            path: "/leisure/tourist-spots",
+            element: <TouristSpotsManager />,
+          },
+          {
+            icon: <MapPinIcon {...icon} />,
+            name: "Itineraries",
+            path: "/leisure/itineraries",
+            element: <ItinerariesManager />,
+          },
+          {
+            icon: <MapPinIcon {...icon} />,
+            name: "Hotels & Stays",
+            path: "/leisure/hotels",
+            element: <HotelsManager />,
+          },
+          {
+            icon: <MapPinIcon {...icon} />,
+            name: "Play Areas",
+            path: "/leisure/play-areas",
+            element: <PlayAreasManager />,
+          },
+          {
+            icon: <MapPinIcon {...icon} />,
+            name: "Hangout Hubs",
+            path: "/leisure/hangout-hubs",
+            element: <HangoutHubsManager />,
+          },
+        ],
+      },
+
+      // =====================================================================
+      // SECTION 7: LOCAL NEWS & COMMUNITY (Phase 1 — Placeholders)
+      // =====================================================================
+      {
+        icon: <DocumentTextIcon {...icon} />,
+        name: "Local News & Community",
+        children: [
+          {
+            icon: <DocumentTextIcon {...icon} />,
+            name: "News Moderation",
+            path: "/content/news-moderation",
+            element: <NewsModeration />,
+          },
+          {
+            icon: <DocumentTextIcon {...icon} />,
+            name: "Community Channels",
+            path: "/content/community-channels",
+            element: <CommunityChannels />,
+          },
+        ],
+      },
+
+      // =====================================================================
+      // OPERATIONS — All Existing Working Screens (preserved as-is)
+      // =====================================================================
       {
         icon: <TableCellsIcon {...icon} />,
         name: "Clean Master Data",
         children: [
-         
-           {
+          {
             icon: <ChartBarIcon {...icon} />,
             name: "Cleaning Dashboard",
             path: "/masterdata/cleaning-dashboard",
             element: <DataCleaningDashboard />,
           },
-           {
+          {
             icon: <ChartBarIcon {...icon} />,
             name: "Tiered Dashboard",
             path: "/masterdata/dynamic-tier-dashboard",
             element: <DynamicTierDashboard />,
           },
-           {
+          {
             icon: <TableCellsIcon {...icon} />,
             name: "Listing Master",
             path: "/masterdata/clean-listing-master",
@@ -546,11 +737,11 @@ export const routes = [
             path: "/masterdata/clean-product-master",
             element: <CleanProductMaster />,
           },
-        ],    
+        ],
       },
       {
         icon: <TableCellsIcon {...icon} />,
-        name: "Master data",
+        name: "Master Data Registry",
         children: [
           {
             icon: <TableCellsIcon {...icon} />,
@@ -566,45 +757,15 @@ export const routes = [
           },
           {
             icon: <TableCellsIcon {...icon} />,
-            name: "Listing Category",
-            path: "/masterdata/listing-category",
-            element: <ListingCategory />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Product Category",
-            path: "/masterdata/product-category",
-            element: <ProductCategory />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Master Categories",
-            path: "/masterdata/master-categories",
-            element: <MasterCategoryManager />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Category Mapping",
-            path: "/masterdata/category-mapping",
-            element: <CategoryMappingDashboard />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
             name: "Duplicate Data",
             path: "/masterdata/duplicate-data",
             element: <DuplicateData />,
           },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Unmatched Data Review",
-            path: "/masterdata/unmatched-data-review",
-            element: <UnmatchedDataReview />,
-          }
         ],
       },
       {
         icon: <TableCellsIcon {...icon} />,
-        name: "Source Wise data",
+        name: "Source Wise Data",
         children: [
           {
             icon: <CheckCircleIcon {...icon} />,
@@ -612,36 +773,6 @@ export const routes = [
             path: "listing-master-data/complete-data",
             element: <ListingComplete />,
           },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "AskLaila Data",
-            path: "listing-master-data/asklaila-data",
-            element: <AsklailaData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "ATM Data",
-            path: "listing-master-data/atm-data",
-            element: <AtmData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Bank Data",
-            path: "listing-master-data/bank-data",
-            element: <BankData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "College Dunia Data",
-            path: "listing-master-data/college-dunia-data",
-            element: <CollegeDuniaData />,
-          }, 
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Duplicate Data",
-            path: "listing-master-data/duplicate-data",
-            element: <DuplicateData />,
-          }, 
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Google Data",
@@ -656,65 +787,16 @@ export const routes = [
           },
           {
             icon: <TableCellsIcon {...icon} />,
-            name: "Hey Places Data",
-            path: "listing-master-data/hey-places-data",
-            element: <HeyPlacesData />,
-          }, 
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Just Dial Data",
-            path: "listing-master-data/just-dial-data",
-            element: <JustDialData />,
+            name: "Duplicate Data",
+            path: "listing-master-data/duplicate-data",
+            element: <DuplicateData />,
           },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Magic Pin Data",
-            path: "listing-master-data/magic-pin-data",
-            element: <MagicPinData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Near Buy Data",
-            path: "listing-master-data/near-buy-data",
-            element: <NearBuyData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Pinda Data",
-            path: "listing-master-data/pinda-data",
-            element: <PindaData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "PO India Data",
-            path: "listing-master-data/po-india-data",
-            element: <POIndiaData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Schoolgis Data",
-            path: "listing-master-data/schoolgis-data",
-            element: <SchoolgisData />,
-          }, 
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Shiksha Data",
-            path: "listing-master-data/shiksha-data",
-            element: <ShikshaData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
-            name: "Yellow Pages Data",
-            path: "listing-master-data/yellow-pages-data",
-            element: <YellowPagesData />,
-          },
-          // ... rest of listing data
           {
             icon: <XCircleIcon {...icon} />,
             name: "Incomplete Data",
             path: "listing-master-data/incomplete-data",
             element: <ListingIncomplate />,
-          }
+          },
         ],
       },
       {
@@ -786,8 +868,8 @@ export const routes = [
             name: "Incomplete Data",
             path: "product-master-data/incomplete-data",
             element: <ProductIncomplate />,
-          }
-        ]
+          },
+        ],
       },
       {
         icon: <TableCellsIcon {...icon} />,
@@ -815,7 +897,7 @@ export const routes = [
       },
       {
         icon: <MagnifyingGlassIcon {...icon} />,
-        name: "Scrapper",
+        name: "Scrapers",
         children: [
           {
             icon: <MapPinIcon {...icon} />,
@@ -829,14 +911,12 @@ export const routes = [
             path: "/scrapper/dmart",
             element: <DmartScrapper />,
           },
-            {
-              icon: <ShoppingCartIcon {...icon} />, 
-              name: "Flipkart",
-              path: "/scrapper/flipkart",
-              element: <FlipkartScrapper />,
-            },
-
-
+          {
+            icon: <ShoppingCartIcon {...icon} />,
+            name: "Flipkart",
+            path: "/scrapper/flipkart",
+            element: <FlipkartScrapper />,
+          },
           {
             icon: <ShoppingCartIcon {...icon} />,
             name: "BigBasket",
@@ -861,7 +941,6 @@ export const routes = [
             path: "/scrapper/amazon",
             element: <AmazonScraper />,
           },
-          // ... rest of scrappers
           {
             icon: <ShoppingCartIcon {...icon} />,
             name: "India Mart",
@@ -876,23 +955,82 @@ export const routes = [
           },
         ],
       },
+
+      // =====================================================================
+      // SEARCH & UTILITY
+      // =====================================================================
+      {
+        icon: <MagnifyingGlassIcon {...icon} />,
+        name: "Search Keyword",
+        path: "/search-keyword",
+        element: <SearchKeyword />,
+      },
       {
         icon: <UserCircleIcon {...icon} />,
-        name: "profile",
+        name: "Profile",
         path: "/profile",
         element: <Profile />,
       },
       {
         icon: <TableCellsIcon {...icon} />,
-        name: "tables",
+        name: "Tables",
         path: "/tables",
         element: <Tables />,
       },
       {
         icon: <InformationCircleIcon {...icon} />,
-        name: "notifications",
+        name: "Notifications",
         path: "/notifications",
         element: <Notifications />,
+      },
+
+      // =====================================================================
+      // HIDDEN ROUTES (detail views, sub-pages — rendered but not in sidebar)
+      // =====================================================================
+      {
+        path: "/listingdata-report",
+        element: <MisReportTable />,
+        hidden: true,
+      },
+      {
+        path: "/productdata-report/products/:asin",
+        element: <ProductDetails />,
+        hidden: true,
+      },
+      {
+        path: "/cities-report",
+        element: <CitiesReports />,
+        hidden: true,
+      },
+      {
+        path: "/categories-report",
+        element: <CategoriesReports />,
+        hidden: true,
+      },
+      {
+        path: "/cities-pending-report",
+        element: <CitiesPendingReport />,
+        hidden: true,
+      },
+      {
+        path: "/categories-pending-report",
+        element: <CategoriesPendingReport />,
+        hidden: true,
+      },
+      {
+        path: "/dashboard/unmatched_data_review",
+        element: <UnmatchedDataReview />,
+        hidden: true,
+      },
+      {
+        path: "/unmatched_data_review",
+        element: <UnmatchedDataReview />,
+        hidden: true,
+      },
+      {
+        path: "/unmatched-data-review",
+        element: <UnmatchedDataReview />,
+        hidden: true,
       },
     ],
   },
@@ -913,7 +1051,7 @@ export const routes = [
         element: <SignUp />,
       },
     ],
-  }
+  },
 ];
 
 export default routes;

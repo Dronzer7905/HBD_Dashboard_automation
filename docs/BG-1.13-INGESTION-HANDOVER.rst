@@ -13,12 +13,14 @@ Cloudflare before PostgreSQL authentication. No company schema, records, grants,
 scrapers, or deployment were changed. Company installation and live API operation
 of the previous BG-1.11 ZIP remain team-reported, not independently reverified.
 
-The new branch is based on main 617e91f. Main did not contain the shipped BG-1.11
-ZIP implementation, so this PR also brings that prerequisite into version control
-with its mapping configuration and blueprint registration. The original BG-1.11
-worktree and unrelated main-checkout Zepto edit are preserved. Historical BG-1.11
-documents describe the earlier delivery; their Draft PR/publication restrictions
-are superseded by the user's 25 November instruction to open a non-draft PR.
+The current PR targets lead/phase1-nav-reorganization (b33d952 at retargeting),
+which is the user's primary integration branch until further notice. It already
+contains the BG-1.11 ZIP and Phase 1 navigation. That base was merged into the
+feature branch without rewriting published commits; its mapping defaults,
+frontend files and navigation are preserved. The current PR diff excludes the
+already integrated mapping runtime. It retains only the mapping test harness
+portability fixes needed by CI, alongside the ingestion/monitoring work.
+The original BG-1.11 worktree and unrelated main-checkout Zepto edit are preserved.
 
 API contract
 ------------
@@ -189,14 +191,14 @@ worker function returned, not that a desired number of scraper rows was saved.
 Frontend integration notes
 --------------------------
 
-Anusha's rondaanusha1-art-feature branch was inspected read-only. Its wizard's
+Anusha's rondaanusha1-art-feature branch and the lead integration branch were inspected. Its wizard's
 multipart start URL, mapping direction, archetype field and progress aliases are
 supported; the requested two-step upload/start-batch flow is also available.
 Scheduler trigger URL aliases are supported. XLS is deliberately unsupported;
 the current wizard's 1 GB client limit must match the server's configured limit.
 
-PipelineStatus.jsx currently calls bare fetch without the shared Axios Bearer
-interceptor. Use the existing authenticated api.get('/pipeline-status') or send
+The lead branch's PipelineStatus.jsx and ScraperScheduler.jsx shells call bare
+fetch without the shared Axios Bearer interceptor. Use the existing authenticated api.get('/pipeline-status') or send
 the Bearer token explicitly. No auth bypass was introduced to compensate for it.
 CommandCenter is currently a static shell. Scheduler pause/resume/log-history
 buttons are outside these requested endpoints and still require their later

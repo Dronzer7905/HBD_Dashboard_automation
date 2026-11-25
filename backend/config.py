@@ -78,15 +78,6 @@ class Config:
     # 4. Session Timeout: 30 DAYS
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=30) 
 
-    # Explicit existing user IDs allowed to approve BG-1.11 mappings; deny by default.
-    MAPPING_APPROVER_IDS = os.getenv('MAPPING_APPROVER_IDS', '')
-    MAPPING_ADMIN_IDS = os.getenv('MAPPING_ADMIN_IDS', '')
-    MAPPING_POSTGRES_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_POSTGRES_ASSOCIATIONS_ENABLED', 'false').lower() == 'true'
-    MAPPING_DEPLOYMENT_ENV = os.getenv('MAPPING_DEPLOYMENT_ENV', '')
-    MAPPING_POSTGRES_DATABASE = os.getenv('MAPPING_POSTGRES_DATABASE', '')
-    # Provisional junction storage is opt-in and additionally restricted to SQLite.
-    MAPPING_LOCAL_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_LOCAL_ASSOCIATIONS_ENABLED', 'false').lower() == 'true'
-
     # Mail configuration
     MAIL_SERVER = 'smtp.gmail.com'
     MAIL_PORT = 587
@@ -104,6 +95,16 @@ class Config:
     MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "100"))
     ETL_VERSION = os.getenv("ETL_VERSION", "2.0.0")
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", "2000"))
+
+    # Explicit existing user IDs allowed to approve BG-1.11 mappings; deny by default.
+    MAPPING_APPROVER_IDS = os.getenv('MAPPING_APPROVER_IDS', '1,2,3,4')
+    MAPPING_ADMIN_IDS = os.getenv('MAPPING_ADMIN_IDS', '1,2,3,4')
+    MAPPING_POSTGRES_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_POSTGRES_ASSOCIATIONS_ENABLED', 'true').lower() == 'true'
+    MAPPING_DEPLOYMENT_ENV = os.getenv('MAPPING_DEPLOYMENT_ENV', 'staging')
+    MAPPING_POSTGRES_DATABASE = os.getenv('MAPPING_POSTGRES_DATABASE', 'testpostgrey')
+    # Provisional junction storage is opt-in and additionally restricted to SQLite.
+    MAPPING_LOCAL_ASSOCIATIONS_ENABLED = os.getenv('MAPPING_LOCAL_ASSOCIATIONS_ENABLED', 'false').lower() == 'true'
+
     # Web and workers must mount the same directory. No client-supplied paths.
     INGESTION_UPLOAD_DIR = os.getenv('INGESTION_UPLOAD_DIR')
     INGESTION_MAX_UPLOAD_BYTES = int(os.getenv('INGESTION_MAX_UPLOAD_BYTES', str(100 * 1024 * 1024)))

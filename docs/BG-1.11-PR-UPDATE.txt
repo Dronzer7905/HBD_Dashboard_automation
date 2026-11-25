@@ -1,14 +1,3 @@
-Publication note - 25 November 2026
-==================================
-
-Historical BG-1.11 delivery record follows. PR 29 has since been closed without
-merge. The user reports the ZIP was applied by the team and has explicitly
-authorized a new non-draft ingestion PR. This branch imports the shipped sources
-because GitHub main lacked them. Current delivery/test/deployment qualifications
-are in docs/BG-1.13-INGESTION-HANDOVER.rst; they supersede historical publication
-status below. Company database access is currently revoked; its installation
-has not been independently reverified today.
-
 <!-- BG111 LOCAL REVIEW START -->
 ## Local PostgreSQL completion package prepared 24 November 2026
 
