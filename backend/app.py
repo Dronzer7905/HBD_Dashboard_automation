@@ -130,6 +130,7 @@ from routes.listing_upload_routes import listing_upload_bp
 from routes.product_report_routes import product_report_bp
 from routes.data_cleaning_routes import data_cleaning_bp
 from routes.category_mapping_routes import category_mapping_bp
+from routes.mapping_routes import mapping_bp
 from routes.master_category_routes import master_category_bp
 from routes.dynamic_tier_routes import dynamic_tier_bp
 from routes.data_enrichment_routes import data_enrichment_bp
@@ -415,6 +416,7 @@ app.register_blueprint(listing_upload_bp, url_prefix="/api/listing-upload")
 app.register_blueprint(product_report_bp, url_prefix="/api/product-report")
 app.register_blueprint(data_cleaning_bp, url_prefix="/api/cleaning")
 app.register_blueprint(category_mapping_bp, url_prefix="/api/category-mapping")
+app.register_blueprint(mapping_bp, url_prefix="/api/mapping")
 app.register_blueprint(master_category_bp, url_prefix="/api/master-categories")
 app.register_blueprint(dynamic_tier_bp)
 app.register_blueprint(data_enrichment_bp, url_prefix="/api/data-enrichment")

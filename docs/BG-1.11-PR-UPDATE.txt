@@ -1,0 +1,167 @@
+Publication note - 25 November 2026
+==================================
+
+Historical BG-1.11 delivery record follows. PR 29 has since been closed without
+merge. The user reports the ZIP was applied by the team and has explicitly
+authorized a new non-draft ingestion PR. This branch imports the shipped sources
+because GitHub main lacked them. Current delivery/test/deployment qualifications
+are in docs/BG-1.13-INGESTION-HANDOVER.rst; they supersede historical publication
+status below. Company database access is currently revoked; its installation
+has not been independently reverified today.
+
+<!-- BG111 LOCAL REVIEW START -->
+## Local PostgreSQL completion package prepared 24 November 2026
+
+**This PR remains Draft. Its published head is still `fa346f041ed92990f8f58e91915757f93abfa808`. The following completion work is local and UNPUBLISHED; no staging, commit or push has been performed. It is not yet included in this PR diff.**
+
+Following the user's reported team-lead approval, prepared the reviewed local solution for PostgreSQL without installing or writing to any company database:
+
+- Explicit new `category_mapping.business_product_category_mappings` contract; the incompatible `silver_clean.business_product_category_mappings` is preserved and never altered or reinterpreted.
+- Atomic multiple-product association approvals, actor-attributed audit history, duplicate/retry protection, parent/product hierarchy validation, PostgreSQL row/shared locks and rollback.
+- Verified product catalog pagination, literal case-insensitive search and marketplace/hierarchy filters.
+- Default dry-run source matching; Bearer-authenticated, allowlisted administrator persistence only at UNROUNDED >=90%, excluding ambiguity and existing/manual mappings. Fuzzy source matching never creates business/product associations.
+- Default-off PostgreSQL/environment/exact-database gates, schema/privilege verification, independent ORM metadata and prohibited ORM schema installation.
+
+### Exact operator deliverables prepared locally
+
+- `backend/sql/bg111/001_create_relationships.sql`: guarded transactional non-production install and shape/key/FK/check assertions.
+- `backend/sql/bg111/002_inspect_relationships.sql`: explicit read-only metadata inspection.
+- `backend/sql/bg111/003_application_permissions.sql`: explicit grants on new objects only to an approved existing application role.
+- `backend/scripts/bg111_postgres.py`: inspect/verify by default; apply/grant require an exact database, local/staging environment and explicit non-production write confirmation.
+- `docs/BG-1.11-POSTGRES-RUNBOOK.rst`: authentication, exact commands, configuration, verification and reversible application-disable procedure.
+- `backend/tests/run_mapping_postgres.py` and `test_bg111_postgres.py`: owned disposable cluster and real PostgreSQL verification.
+
+### Verified results
+
+- **79 SQLite tests passed**, 0 failures/errors/skips, final run 3.498s.
+- **27 actual PostgreSQL integration tests passed**, 0 failures/errors/skips, final run 7.587s; PostgreSQL 18.7 on an owned disposable LOCAL cluster with synthetic data only.
+- Actual installation/rerun, CLI, grants, PK/FK/unique/checks, timestamps, concurrency, hierarchy-lock protection, default zero-write dry-run, 90% boundary, ambiguity, manual protection and atomic mapping/audit rollback verified.
+- Nine-step offline demo, Python compilation and whitespace checks passed. Company schema rechecked read-only on 24 November; unchanged. Company connection/tunnel and owned test clusters were closed; temporary test authentication files removed.
+
+### Remaining publication and deployment steps
+
+The local source package must be reviewed and explicitly approved for commit/push before these changes can appear in this PR. The DBA must approve the separate namespace, actual taxonomy/role selections and non-production target, then install/verify with the runbook and configure approved user allowlists. No company DDL/DML/grants, production deployment, full application startup or frontend integration was performed. Existing model/schema drift and weaker legacy route authorization remain separately documented risks.
+
+**Keep Draft. Do not merge, enable auto-merge or deploy this PR as if these unpublished local files were already present. No second PR was created.**
+<!-- BG111 LOCAL REVIEW END -->
+
+## Published implementation at fa346f0
+
+The description below documents the code currently published in this PR. It does not describe the unpublished completion package above.
+
+**Draft / Partial BG-1.11 implementation pending schema and deployment review.**
+
+## Summary and scope
+
+Developer: Bhargav Sonawane. Add category-mapping backend APIs for CityHangaround using the existing single-target mapping schema. This implements bounded retrieval, a manual approval operation, and bulk read-only matching suggestions. It does not complete the business-to-product relationship requirement and is not production-ready.
+
+Head: `bhargav/BG-1.11-category-mapping` -> base: `main`.
+Commit: `fa346f041ed92990f8f58e91915757f93abfa808`.
+Base verified against `origin/main`: `617e91f3f36022dd57171382a0847d62749deb2c`; no integration conflicts were present.
+
+## Endpoint behavior
+
+### GET /api/mapping/categories
+
+- Requires a valid JWT. Returns independently paginated existing source bridge rows and active canonical nodes, preserving IDs, hierarchy and existing mapping fields.
+- `page`/`limit` default to 1/50; `category_page`/`category_limit` default to 1/100; each page size is at most 200.
+- Supports exact `platform_name`, literal raw-category/subcategory `search`, `parent_id` (an ID or `root`), and `status=unmapped|all`.
+- Default sources are active PENDING/UNMAPPED rows with no target. `status=all` includes existing assignments. It does not discover new labels or reintegrate unmatched business/product records.
+- Separate business, business-subcategory, and product/service sections are null, with explicit unsupported capability metadata, because no approved cross-domain schema exists.
+
+### POST /api/mapping/map-category
+
+- Requires a Bearer JWT, an existing user, and that user's ID explicitly configured in `MAPPING_APPROVER_IDS`. Default configuration denies approval. Cookie-only approval is rejected.
+- Identifies an existing source by `mapping_id` or an exact platform/raw-category/raw-subcategory tuple; accepts ONE existing `master_category_id` target, plus an optional direct `parent_category_id` assertion.
+- Validates types/IDs, source identity and active status, target existence, all active ancestors, parent levels and cycles. Preserves raw text and creates no new source/taxonomy rows.
+- Uses a source-row lock and commits the mapping with an actor-attributed history row in one transaction; errors roll back.
+- Identical repeated approval returns `changed=false` without duplicate history. A conflicting existing human-approved mapping returns 409.
+- Separate business/product association fields return 422 `unsupported_relationship`.
+
+### POST /api/mapping/auto-map
+
+- Requires a valid JWT. Returns bulk suggestions only; `dry_run` defaults true. Explicit `dry_run=false` returns 422 `persistence_disabled`.
+- Processes eligible active PENDING/UNMAPPED source rows without an existing target; supports exact platform filtering and `after_id` keyset pagination. Default batch 25, maximum 50.
+- Normalizes comparison copies using Unicode normalization, case, whitespace, punctuation and ampersand/and equivalence. Stored raw/canonical strings remain unchanged.
+- Resolves database synonyms against existing active canonical targets. Otherwise uses normalized Levenshtein similarity `1 - distance/max_length`, accepting candidates at >=80%.
+- Returns up to three candidates with scores and exact/synonym, fuzzy-review, ambiguous or unmatched classifications. Ties/competitors within five percentage points require review. Even high-confidence results require manual approval.
+- Reconstructs valid hierarchy paths from actual parents; excludes invalid/inactive chains. No automatic persistence, status changes, history writes, taxonomy generation or overwriting of existing mappings.
+- Caps the catalog at 2000 active canonical nodes and 5000 synonyms, returning an explicit capacity error instead of using an incomplete catalog. Configured aliases score the resolved target comparison; they do not imply raw-string edit similarity.
+
+## Existing components reused and files changed
+
+Reuses Flask blueprints, Flask-JWT-Extended, `extensions.db`, existing serializers, `MasterCategory`, `PlatformCategoryMapping`, `CategoryMappingSynonym`, `CategoryMappingHistory`, and `User`.
+
+The existing category sync/generation/cleanup services are not invoked, because they can create/reactivate taxonomy entries and commit broader changes. No new dependency or schema was added.
+
+Exactly seven task files are included:
+
+- `backend/app.py`: blueprint import and registration.
+- `backend/config.py`: explicit default-deny `MAPPING_APPROVER_IDS` configuration.
+- `backend/routes/mapping_routes.py`: endpoints, JWT/approver checks, request handling and API errors.
+- `backend/services/mapping_service.py`: queries, validation, transaction/history, bounded matching and capability metadata.
+- `backend/tests/test_mapping_api.py`: 41 isolated tests.
+- `backend/tests/demo_mapping_api.py`: synthetic offline walkthrough.
+- `docs/BG-1.11-HANDOVER.rst`: findings, API examples, evidence and requirement assessment; publication note distinguishes the original uncommitted snapshot from this branch.
+
+The unrelated original-worktree modification in `backend/routes/zepto_routes.py` is excluded and its SHA-256 remains unchanged. No credentials, .env files, confidential records, scraper/scheduler work, frontend changes, or BG-1.12 work are included.
+
+[Full engineering handover](https://github.com/honeybee-digital/HBD_Dashboard_automation/blob/bhargav/BG-1.11-category-mapping/docs/BG-1.11-HANDOVER.rst)
+
+## Offline verification
+
+Run from `D:\HBD DASHBOARD\HBD_BG_1_11` in PowerShell. Exact commands executed before committing:
+
+```powershell
+& 'D:\HBD DASHBOARD\HBD_Dashboard_automation\venv\Scripts\python.exe' -m unittest discover -s backend/tests -p 'test_mapping_api.py' -v
+& 'D:\HBD DASHBOARD\HBD_Dashboard_automation\venv\Scripts\python.exe' backend/tests/demo_mapping_api.py
+& 'D:\HBD DASHBOARD\HBD_Dashboard_automation\venv\Scripts\python.exe' -m py_compile backend/routes/mapping_routes.py backend/services/mapping_service.py backend/tests/test_mapping_api.py backend/tests/demo_mapping_api.py backend/app.py backend/config.py
+git diff --check
+git diff --cached --check
+```
+
+- Latest unit/integration run: **41 passed, 0 failures, 0 errors**, 1.160 seconds, isolated in-memory SQLite. Network socket connections are forbidden in the fixtures.
+- Covers pagination/filtering, manual save, input errors, invalid IDs/hierarchies, inactive/cyclic ancestry, synonyms, 80% boundaries, ambiguous/close matches, unmatched values, zero-write dry runs, rollback, authorization, idempotency, existing-mapping protection and selected route registration.
+- Matcher cross-check includes 16129 string pairs against an independent full-distance reference. Query-count tests check <=4 retrieval and <=3 suggestion queries.
+- Demo exit 0: retrieval 200; dry-run 200 with zero audit rows; viewer denied 403; approver save 200; repeat 200 with exactly one audit row; unsupported product association 422.
+- Syntax and whitespace checks passed. Existing datetime deprecation warnings and simulated rejection/rollback logs are expected negative-test output.
+- PostgreSQL `FOR UPDATE` SQL was compiled, but no PostgreSQL runtime or concurrent locking test was executed. The selected real registration/auth-hook code is exercised in an isolated harness; this is not full Flask application startup.
+
+## Database and spreadsheet safety
+
+No company/shared/production database was connected to or modified. No migrations, schema changes, data cleanup, sync jobs or company-data scripts were executed. Tests/demo wrote synthetic records only to disposable SQLite memory databases. The Google Sheet was previously reviewed read-only and was not modified. No deployment was performed or requested by this PR; do not merge, enable auto-merge, or deploy this draft.
+
+## Explicit limitations and blocked requirements
+
+- **Business-to-product and one-to-many product/service associations are NOT implemented.** The current approved bridge schema has one target FK and no approved cross-domain association model.
+- **Bulk matching suggestions work; bulk writes and automatic mapping persistence are NOT implemented.** Suggestions require explicit individual manual approval.
+- The 41 tests use SQLite memory only. Production PostgreSQL/schema compatibility, actual concurrency behavior, full Flask startup and frontend integration remain unverified.
+- Manual approval requires team-approved `MAPPING_APPROVER_IDS` configuration; it defaults to deny.
+- Existing legacy category/master routes have weaker authorization, including global-auth bypasses. This task does not change or secure those routes; they require separate review.
+- Active canonical rows have no approval/domain flag, and legacy sync may auto-create rows. They have not been certified against the approved reference taxonomy.
+- Catalogs larger than 2000 active canonical nodes or 5000 synonyms require a scoped/indexed matching design; current behavior fails closed.
+- No automatic source discovery, unmatched-review reintegration, taxonomy import, spelling cleanup or frontend changes are included.
+
+## Questions for team lead / DBA approval
+
+1. What approved schema should represent a business category, its subcategory, and one-to-many product/service category associations? Which existing taxonomy IDs/tables are authoritative, and how will category domains and approved records be distinguished?
+2. Should a separately approved follow-up add bulk persistence? If so, what permission model, confidence/review rules, idempotency semantics, audit requirements and protection of human-approved mappings are required? This PR deliberately provides no automatic-persistence path.
+3. Which existing user IDs may approve mappings, and who owns a separate security change for legacy category mutation/sync routes?
+4. Which isolated PostgreSQL environment and taxonomy sample are approved for deployment/concurrency/capacity verification before further readiness review?
+
+## Review checklist
+
+- [x] Exactly seven approved task files; unrelated zepto edit excluded.
+- [x] Three requested endpoint routes preserved and minimally registered.
+- [x] Default-deny manual authorization, audit attribution, idempotency and rollback covered offline.
+- [x] >=80% matching, synonym handling, ambiguity and zero-write dry-run behavior tested.
+- [x] 41 offline tests, demo, syntax and whitespace checks passed.
+- [x] No production DB/Sheet modifications, migrations, deployment or automatic persistence.
+- [x] Partial scope and schema/deployment blockers stated explicitly.
+- [ ] Team lead/DBA approves business-to-product taxonomy and relationship schema.
+- [ ] Team approves any future bulk persistence contract and authorization policy.
+- [ ] Production-like isolated PostgreSQL, full startup and frontend integration verified.
+- [ ] Actual approver IDs configured and legacy-route authorization reviewed separately.
+- [ ] Taxonomy approval/provenance and matching-capacity limits validated.
+
+Keep this PR in Draft while these reviews remain open. Do not merge or deploy.
