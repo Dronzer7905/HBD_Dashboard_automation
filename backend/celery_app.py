@@ -158,6 +158,13 @@ celery.conf.beat_schedule = {
 
 celery.autodiscover_tasks(["tasks"])
 
+# Bulk tasks have their own queue; existing task routing is retained.
+celery.conf.task_routes = {
+    **(celery.conf.task_routes or {}),
+    'tasks.bulk_ingest.*': {'queue': 'heavy_ingestion'},
+}
+import tasks.bulk_ingest
+
 import tasks.listings_task.upload_asklaila_task
 import tasks.listings_task.upload_atm_task
 import tasks.listings_task.upload_bank_task
@@ -180,6 +187,7 @@ import tasks.products_task.upload_zepto_task
 import tasks.products_task.amazon_scraper_task
 import tasks.products_task.dmart_scraper_task
 import tasks.products_task.indiamart_scraper_task
+import tasks.products_task.blinkit_scraper_task
 import tasks.gdrive_task.etl_tasks
 import tasks.deep_scraper_task
 import tasks.refresh_top_cities

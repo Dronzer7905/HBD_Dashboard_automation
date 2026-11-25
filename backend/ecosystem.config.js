@@ -15,7 +15,7 @@ export const apps = [
     {
         name: "celery-worker",
         script: "venv/bin/celery",
-        args: "-A celery_app worker --loglevel=info -P gevent -c 100", // 100 greenlets for high concurrency I/O
+        args: "-A celery_app worker --loglevel=info -P gevent -c 100 -Q celery,heavy_ingestion", // Consume legacy and bulk queues
         interpreter: "none",
         watch: false,
         max_memory_restart: "1G", // Kills & Restarts worker if it exceeds 1GB RAM

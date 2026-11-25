@@ -77,6 +77,7 @@ class Config:
 
     # 4. Session Timeout: 30 DAYS
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=30) 
+
     # Explicit existing user IDs allowed to approve BG-1.11 mappings; deny by default.
     MAPPING_APPROVER_IDS = os.getenv('MAPPING_APPROVER_IDS', '')
     MAPPING_ADMIN_IDS = os.getenv('MAPPING_ADMIN_IDS', '')
@@ -103,6 +104,14 @@ class Config:
     MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "100"))
     ETL_VERSION = os.getenv("ETL_VERSION", "2.0.0")
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", "2000"))
+    # Web and workers must mount the same directory. No client-supplied paths.
+    INGESTION_UPLOAD_DIR = os.getenv('INGESTION_UPLOAD_DIR')
+    INGESTION_MAX_UPLOAD_BYTES = int(os.getenv('INGESTION_MAX_UPLOAD_BYTES', str(100 * 1024 * 1024)))
+    INGESTION_CHUNK_SIZE = min(int(os.getenv('INGESTION_CHUNK_SIZE', '2500')), 2500)
+    INGESTION_CHUNK_COOLDOWN = float(os.getenv('INGESTION_CHUNK_COOLDOWN', '0.25'))
+    SCHEDULER_OPERATOR_IDS = os.getenv('SCHEDULER_OPERATOR_IDS', '')
+    PIPELINE_STAGE_SOURCES = os.getenv('PIPELINE_STAGE_SOURCES')
+    PIPELINE_QUERY_TIMEOUT_MS = int(os.getenv('PIPELINE_QUERY_TIMEOUT_MS', '2000'))
 
 # Instantiate config for import convenience
 config = Config()

@@ -24,6 +24,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/2
+      - INGESTION_UPLOAD_DIR=/app/tmp/uploads/staging
     volumes:
       - uploads:/app/tmp/uploads
     depends_on:
@@ -31,7 +32,7 @@ services:
 
   worker:
     build: .
-    command: celery -A celery_app.celery worker --loglevel=info
+    command: celery -A celery_app.celery worker --loglevel=info -Q celery,heavy_ingestion
     env_file:
       - .env
     environment:
@@ -39,6 +40,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/2
+      - INGESTION_UPLOAD_DIR=/app/tmp/uploads/staging
     volumes:
       - uploads:/app/tmp/uploads
     depends_on:
