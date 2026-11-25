@@ -128,18 +128,23 @@ def similarity(left, right):
     return 1 - distance / size if distance <= budget else None
 
 
-def source_query(platform=None, search=None, status='unmapped'):
+def source_query(platform=None, search=None, status='all'):
     query = PlatformCategoryMapping.query.options(joinedload(PlatformCategoryMapping.master_category))
     query = query.filter(PlatformCategoryMapping.is_active.is_(True))
-    if status == 'unmapped':
+    st = (status or 'all').lower()
+    if st in ('unmapped', 'pending'):
         query = query.filter(
             PlatformCategoryMapping.mapping_status.in_(['PENDING', 'UNMAPPED']),
             PlatformCategoryMapping.master_category_id.is_(None),
         )
-    elif status != 'all':
-        raise MappingError('status must be unmapped or all')
-    if platform:
-        query = query.filter(PlatformCategoryMapping.platform_name == platform)
+    elif st == 'auto_mapped':
+        query = query.filter(PlatformCategoryMapping.mapping_status == 'AUTO_MAPPED')
+    elif st == 'manually_mapped':
+        query = query.filter(PlatformCategoryMapping.mapping_status == 'MANUALLY_MAPPED')
+    elif st != 'all':
+        raise MappingError('status must be all, unmapped, auto_mapped, or manually_mapped')
+    if platform and platform.lower() != 'all':
+        query = query.filter(PlatformCategoryMapping.platform_name.ilike(platform))
     if search:
         query = query.filter(or_(
             PlatformCategoryMapping.platform_category_raw.contains(search, autoescape=True),

@@ -10,6 +10,7 @@ from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 from extensions import db
 from model.user import User
 from services import mapping_service as service
+from services import business_product_mapping_service as bpm_service
 
 
 mapping_bp = Blueprint('mapping_bp', __name__)
@@ -134,3 +135,81 @@ def auto_map():
     if result['transaction_failed']:
         return jsonify(status='error', code='mapping_failure', **result), 500
     return jsonify(status='success', **result)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  BUSINESS CATEGORY <-> PRODUCT CATEGORY MAPPING & REPORTING ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@mapping_bp.route('/business-products', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_business_products():
+    """List paginated active associations with rich details."""
+    page = query_integer('page', 1, 100_000)
+    limit = query_integer('limit', 50, 200)
+    b_id = request.args.get('business_category_id')
+    sub_id = request.args.get('business_subcategory_id')
+    marketplace = request.args.get('marketplace_name')
+    search = request.args.get('search')
+    result = bpm_service.get_business_product_mappings(
+        page=page, limit=limit, business_id=b_id,
+        subcategory_id=sub_id, marketplace=marketplace, search=search
+    )
+    return jsonify(status='success', data=result)
+
+
+@mapping_bp.route('/business-products/stats', methods=['GET'])
+@jwt_required()
+@api_errors
+def get_business_products_stats():
+    """Executive KPI summary and platform breakdown."""
+    stats = bpm_service.get_business_product_stats()
+    return jsonify(status='success', data=stats)
+
+
+@mapping_bp.route('/business-products/auto-map', methods=['POST'])
+@jwt_required()
+@api_errors
+def auto_map_business_products():
+    """Discover candidate product mappings for business subcategories."""
+    data = body()
+    b_id = data.get('business_category_id')
+    marketplace = data.get('marketplace_name')
+    limit = int(data.get('limit', 100))
+    threshold = float(data.get('threshold', 0.75))
+    suggestions = bpm_service.auto_map_business_to_products(
+        business_id=b_id, marketplace=marketplace, limit=limit, threshold=threshold
+    )
+    return jsonify(status='success', count=len(suggestions), data=suggestions)
+
+
+@mapping_bp.route('/business-products/approve', methods=['POST'])
+@jwt_required(locations=['headers'])
+@api_errors
+def approve_business_products():
+    """Approve candidate associations (single or batch)."""
+    identity = authorized_user('MAPPING_APPROVER_IDS')
+    data = body()
+    items = data.get('items', [])
+    if not isinstance(items, list) or not items:
+        # Support single item format
+        if 'business_category_id' in data and 'business_subcategory_id' in data and 'product_category_id' in data:
+            items = [data]
+        else:
+            raise service.MappingError('A list of items to approve is required')
+    result = bpm_service.approve_business_product_mappings(items, actor_id=identity)
+    return jsonify(status='success', data=result)
+
+
+@mapping_bp.route('/business-products/<int:mapping_id>', methods=['DELETE'])
+@jwt_required(locations=['headers'])
+@api_errors
+def delete_business_product(mapping_id):
+    """Remove an association from storage."""
+    identity = authorized_user('MAPPING_APPROVER_IDS')
+    success = bpm_service.delete_business_product_mapping(mapping_id, actor_id=identity)
+    if not success:
+        return jsonify(status='error', message='Mapping association not found'), 404
+    return jsonify(status='success', message='Mapping association deleted')
+

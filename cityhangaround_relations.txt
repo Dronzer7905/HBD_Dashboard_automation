@@ -1,0 +1,36 @@
+      child_table       |   child_column   |   parent_table    | parent_column | update_rule | delete_rule 
+------------------------+------------------+-------------------+---------------+-------------+-------------
+ ad_cpm_master          | ad_slot_id       | ad_slots          | id            | NO ACTION   | SET NULL
+ ad_fallback_rules      | network_id       | ad_networks       | id            | NO ACTION   | CASCADE
+ ad_page_slots          | ad_page_id       | ad_pages          | id            | NO ACTION   | CASCADE
+ ad_page_slots          | ad_slot_id       | ad_slots          | id            | NO ACTION   | CASCADE
+ ad_sets                | ad_campaign_id   | ad_campaigns      | id            | NO ACTION   | CASCADE
+ ad_slot_fallbacks      | ad_slot_id       | ad_slots          | id            | NO ACTION   | CASCADE
+ ad_slot_fallbacks      | default_ad_id    | default_ads       | id            | NO ACTION   | CASCADE
+ ad_slot_fallbacks      | network_unit_id  | ad_fallback_rules | id            | NO ACTION   | CASCADE
+ ad_slot_placements     | ad_id            | ads               | id            | NO ACTION   | CASCADE
+ ad_slot_placements     | ad_slot_id       | ad_slots          | id            | NO ACTION   | CASCADE
+ ad_stats_daily         | ad_campaign_id   | ad_campaigns      | id            | NO ACTION   | CASCADE
+ ad_stats_daily         | ad_id            | ads               | id            | NO ACTION   | CASCADE
+ ad_targeting           | ad_campaign_id   | ad_campaigns      | id            | NO ACTION   | CASCADE
+ ad_targeting           | ad_set_id        | ad_sets           | id            | NO ACTION   | CASCADE
+ ad_view_logs           | ad_campaign_id   | ad_campaigns      | id            | NO ACTION   | CASCADE
+ ad_view_logs           | ad_id            | ads               | id            | NO ACTION   | CASCADE
+ ads                    | ad_campaign_id   | ad_campaigns      | id            | NO ACTION   | CASCADE
+ ads                    | ad_cpm_master_id | ad_cpm_master     | id            | NO ACTION   | SET NULL
+ ads                    | ad_set_id        | ad_sets           | id            | NO ACTION   | CASCADE
+ ads                    | ad_slot_id       | ad_slots          | id            | NO ACTION   | CASCADE
+ campaign_templates     | created_by       | users             | id            | RESTRICT    | CASCADE
+ default_ads            | ad_page_id       | ad_pages          | id            | NO ACTION   | SET NULL
+ default_ads            | ad_slot_id       | ad_slots          | id            | NO ACTION   | CASCADE
+ email_templates        | user_id          | users             | id            | RESTRICT    | CASCADE
+ mailing_lists          | created_by       | users             | id            | RESTRICT    | CASCADE
+ marketplace_messages   | sender_id        | users             | id            | RESTRICT    | CASCADE
+ page_messages          | sender_id        | users             | id            | RESTRICT    | CASCADE
+ payment_transactions   | user_id          | users             | id            | RESTRICT    | CASCADE
+ telescope_entries_tags | entry_uuid       | telescope_entries | uuid          | RESTRICT    | CASCADE
+ tickets                | user_id          | users             | id            | RESTRICT    | CASCADE
+ user_subscriptions     | user_id          | users             | id            | RESTRICT    | CASCADE
+ wallets                | user_id          | users             | id            | RESTRICT    | CASCADE
+(32 rows)
+
