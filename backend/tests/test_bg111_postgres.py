@@ -189,7 +189,16 @@ class PostgresMappingTests(unittest.TestCase):
         with self.connection() as connection:
             with self.assertRaises(psycopg2.Error) as error:
                 with connection.cursor() as cursor: cursor.execute('DELETE FROM public.users WHERE id=1')
-            self.assertEqual(error.exception.pgcode,'23001')
+            # PostgreSQL 18 changed RESTRICT from foreign_key_violation to
+            # restrict_violation. Keep the version-specific assertion strict.
+            expected = '23001' if connection.server_version >= 180000 else '23503'
+            self.assertEqual(error.exception.pgcode, expected)
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT COUNT(*) FROM public.users WHERE id=1')
+                self.assertEqual(cursor.fetchone()[0], 1)
+                cursor.execute('SELECT COUNT(*) FROM category_mapping.business_product_category_mappings '
+                               'WHERE approved_by_user_id=1')
+                self.assertEqual(cursor.fetchone()[0], 1)
 
     def test_audit_failure_rolls_back_real_flushed_associations(self):
         count=0

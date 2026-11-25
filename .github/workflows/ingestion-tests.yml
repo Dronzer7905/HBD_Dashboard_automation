@@ -31,6 +31,8 @@ jobs:
       - name: SQLite ingestion and actual Celery worker
         run: python -m unittest discover -s backend/tests -p 'test_ingestion*.py' -q
       - name: Owned PostgreSQL mapping integration
-        run: python backend/tests/run_mapping_postgres.py --postgres-bin "$(pg_config --bindir)"
+        run: |
+          pg_config --version
+          python backend/tests/run_mapping_postgres.py --postgres-bin "$(pg_config --bindir)"
       - name: Owned PostgreSQL ingestion integration
         run: python backend/tests/run_ingestion_postgres.py --postgres-bin "$(pg_config --bindir)"
