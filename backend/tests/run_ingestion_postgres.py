@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
 import shutil
 import socket
 import subprocess
@@ -65,6 +66,10 @@ def main():
         env.update(PGHOST='127.0.0.1',PGPORT=str(port),PGUSER=owner,PGDATABASE=database,
                    PGPASSFILE=str(passfile),PGSSLMODE='disable')
         options = f'-h 127.0.0.1 -p {port} -c max_connections=20'
+        if os.name != 'nt':
+            # Packaged Linux PostgreSQL defaults may point to a service-owned
+            # /var/run socket directory. Keep sockets in our owned test folder.
+            options += ' -k ' + shlex.quote(str(directory))
         # On Windows, postmaster can inherit pg_ctl pipe handles. Real files
         # and DEVNULL stdin avoid communicate() waiting for the server to exit.
         started = True  # Also run ownership-scoped cleanup after partial startup.
@@ -73,6 +78,10 @@ def main():
                                   stdout=controller_log,stderr=controller_log,stdin=subprocess.DEVNULL,timeout=45)
         if started_process.returncode:
             print('Disposable PostgreSQL startup failed; controller exit',started_process.returncode)
+            for log_name in ['controller.log', 'server.log']:
+                log = directory / log_name
+                if log.exists():
+                    print(log_name + ': ' + log.read_text(encoding='utf-8', errors='replace')[-2000:])
             return 1
         import psycopg2
         import psycopg2.sql
