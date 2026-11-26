@@ -71,12 +71,18 @@ def list_master_categories():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+_TREE_CACHE = {'timestamp': 0, 'data': None, 'active_only': None}
+
 # ─── TREE VIEW ───────────────────────────────────────────────────────
 @master_category_bp.route('/tree', methods=['GET'])
 def get_category_tree():
     """Return the full category hierarchy as a nested JSON tree."""
+    import time
     try:
         active_only = request.args.get('active_only', 'true').lower() != 'false'
+        now = time.time()
+        if _TREE_CACHE['data'] is not None and _TREE_CACHE['active_only'] == active_only and (now - _TREE_CACHE['timestamp']) < 300:
+            return jsonify({'status': 'success', 'data': _TREE_CACHE['data']}), 200
 
         # Fetch all categories in a single query to prevent N+1 query performance bottleneck
         query = MasterCategory.query
@@ -125,6 +131,9 @@ def get_category_tree():
         for root in roots:
             sort_children(root)
 
+        _TREE_CACHE['data'] = roots
+        _TREE_CACHE['active_only'] = active_only
+        _TREE_CACHE['timestamp'] = now
         return jsonify({'status': 'success', 'data': roots}), 200
 
     except Exception as e:

@@ -57,7 +57,7 @@ def list_mappings():
         limit = request.args.get('limit', 50, type=int)
         limit = max(1, min(limit, 200))
 
-        query = PlatformCategoryMapping.query
+        query = PlatformCategoryMapping.query.options(db.joinedload(PlatformCategoryMapping.master_category))
         if active_only:
             query = query.filter_by(is_active=True)
         if platform and platform.lower() != 'all':
@@ -100,7 +100,7 @@ def list_pending():
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 50, type=int)
 
-        query = PlatformCategoryMapping.query.filter(
+        query = PlatformCategoryMapping.query.options(db.joinedload(PlatformCategoryMapping.master_category)).filter(
             PlatformCategoryMapping.is_active == True,
             PlatformCategoryMapping.mapping_status.in_(['PENDING', 'UNMAPPED']),
         )
@@ -255,7 +255,7 @@ def approve_all_mappings():
         changed_by = data.get('changed_by', 'admin')
         
         # 1. Fetch matching entries to build history (id, master_category_id)
-        query = PlatformCategoryMapping.query.filter_by(
+        query = PlatformCategoryMapping.query.options(db.joinedload(PlatformCategoryMapping.master_category)).filter_by(
             mapping_status='AUTO_MAPPED',
             is_active=True
         )

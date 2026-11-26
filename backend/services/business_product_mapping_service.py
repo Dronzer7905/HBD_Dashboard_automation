@@ -998,16 +998,22 @@ def get_listing_details_and_products(listing_id: int, product_limit=24, marketpl
     # 1. Resolve product categories for retail stores
     p_cats = []
     # Check approved mappings first
-    appr = db.session.execute(text("""
+    appr_where = ["m.status = 'APPROVED'"]
+    appr_params = {'cat': f"%{b_cat}%", 'sub': f"%{b_sub}%"}
+    appr_where.append("(b_cat.name ILIKE :cat OR b_sub.name ILIKE :sub)")
+    if marketplace and marketplace.lower() != 'all':
+        appr_where.append("pcm.marketplace_name ILIKE :appr_mkt")
+        appr_params['appr_mkt'] = f"%{marketplace}%"
+
+    appr = db.session.execute(text(f"""
         SELECT pcm.id, pcm.marketplace_name, pcm.category_name, pcm.category_path, pcm.category_level
         FROM category_mapping.business_product_category_mappings m
         JOIN public.master_categories b_cat ON m.business_category_id = b_cat.id
         LEFT JOIN public.master_categories b_sub ON m.business_subcategory_id = b_sub.id
         JOIN public.product_category_master pcm ON m.product_category_id = pcm.id
-        WHERE m.status = 'APPROVED' AND (
-            b_cat.name ILIKE :cat OR b_sub.name ILIKE :sub
-        );
-    """), {'cat': f"%{b_cat}%", 'sub': f"%{b_sub}%"}).fetchall()
+        WHERE {' AND '.join(appr_where)}
+        ORDER BY pcm.marketplace_name ASC, pcm.id ASC;
+    """), appr_params).fetchall()
 
     for row in appr:
         p_cats.append({
@@ -1019,27 +1025,40 @@ def get_listing_details_and_products(listing_id: int, product_limit=24, marketpl
             'match_source': 'APPROVED_BRIDGE'
         })
 
-    # If no approved categories yet, use verified domain product categories
-    if not p_cats:
+    # If no approved categories yet or if user requested a specific marketplace not in approved set, use verified domain product categories
+    if not p_cats or (marketplace and marketplace.lower() != 'all' and not any(c['marketplace_name'].lower() == marketplace.lower() for c in p_cats)):
         terms = domain_info.get('pcm_terms', [])
         if terms:
             term_likes = " OR ".join([f"category_name ILIKE '%{t}%' OR category_path ILIKE '%{t}%'" for t in terms[:4]])
-            f_cats = db.session.execute(text(f"""
+            f_where = [f"({term_likes})"]
+            f_params = {}
+            if marketplace and marketplace.lower() != 'all':
+                f_where.append("marketplace_name ILIKE :f_mkt")
+                f_params['f_mkt'] = f"%{marketplace}%"
+
+            f_sql = f"""
                 SELECT id, marketplace_name, category_name, category_path, category_level
                 FROM public.product_category_master
-                WHERE {term_likes}
-                ORDER BY marketplace_name ASC
-                LIMIT 8;
-            """)).fetchall()
+                WHERE {' AND '.join(f_where)}
+                ORDER BY id ASC
+                LIMIT 40;
+            """
+            f_cats = db.session.execute(text(f_sql), f_params).fetchall()
+            seen_mkts = {}
             for row in f_cats:
-                p_cats.append({
-                    'id': row.id,
-                    'marketplace_name': row.marketplace_name,
-                    'category_name': row.category_name,
-                    'category_path': row.category_path,
-                    'category_level': row.category_level,
-                    'match_source': 'DOMAIN_VERIFIED'
-                })
+                mkt = row.marketplace_name
+                if mkt not in seen_mkts:
+                    seen_mkts[mkt] = 0
+                if seen_mkts[mkt] < 2:  # Up to 2 categories per platform for balanced representation
+                    seen_mkts[mkt] += 1
+                    p_cats.append({
+                        'id': row.id,
+                        'marketplace_name': row.marketplace_name,
+                        'category_name': row.category_name,
+                        'category_path': row.category_path,
+                        'category_level': row.category_level,
+                        'match_source': 'DOMAIN_VERIFIED'
+                    })
 
     # 2. Fetch live products from product_master strictly matching the resolved product categories
     products = []
@@ -1047,7 +1066,8 @@ def get_listing_details_and_products(listing_id: int, product_limit=24, marketpl
     cat_ids = list(set(c['id'] for c in p_cats if c.get('id')))
 
     prod_where = []
-    prod_params = {'limit': product_limit}
+    store_salt = (listing_id * 37) % 100000
+    prod_params = {'limit': product_limit, 'store_salt': store_salt}
 
     cat_matches = []
     if cat_ids:
@@ -1072,13 +1092,57 @@ def get_listing_details_and_products(listing_id: int, product_limit=24, marketpl
 
     where_sql = " AND ".join(prod_where) if prod_where else "1=1"
 
-    prod_rows = db.session.execute(text(f"""
-        SELECT id, marketplace_name, asin, product_name, brand, price, list_price, discount, stars, img_url, product_url, category_name
-        FROM product_master
-        WHERE {where_sql}
-        ORDER BY id DESC
-        LIMIT :limit;
-    """), prod_params).fetchall()
+    # Order by store-salted ID to guarantee product variety across different stores while remaining strictly deterministic
+    if not marketplace or marketplace.lower() == 'all':
+        # Fetch a balanced multi-platform mix so user sees diverse platforms
+        balanced_rows = []
+        available_mkts = ['Amazon', 'Flipkart', 'IndiaMART', 'Blinkit', 'Zepto', 'BigBasket', 'DMart', 'JioMart']
+        per_mkt_limit = max(2, product_limit // 4)
+        for m in available_mkts:
+            m_sql = f"""
+                SELECT id, marketplace_name, asin, product_name, brand, price, list_price, discount, stars, img_url, product_url, category_name
+                FROM product_master
+                WHERE {where_sql} AND marketplace_name ILIKE :mkt_name
+                ORDER BY ((id + :store_salt) % 999983) DESC
+                LIMIT :m_limit;
+            """
+            m_rows = db.session.execute(text(m_sql), {**prod_params, 'mkt_name': f"%{m}%", 'm_limit': per_mkt_limit}).fetchall()
+            balanced_rows.extend(m_rows)
+            if len(balanced_rows) >= product_limit:
+                break
+        prod_rows = balanced_rows[:product_limit] if balanced_rows else db.session.execute(text(f"""
+            SELECT id, marketplace_name, asin, product_name, brand, price, list_price, discount, stars, img_url, product_url, category_name
+            FROM product_master
+            WHERE {where_sql}
+            ORDER BY ((id + :store_salt) % 999983) DESC
+            LIMIT :limit;
+        """), prod_params).fetchall()
+    else:
+        prod_rows = db.session.execute(text(f"""
+            SELECT id, marketplace_name, asin, product_name, brand, price, list_price, discount, stars, img_url, product_url, category_name
+            FROM product_master
+            WHERE {where_sql}
+            ORDER BY ((id + :store_salt) % 999983) DESC
+            LIMIT :limit;
+        """), prod_params).fetchall()
+
+    # Fallback if specific marketplace didn't have products in exact category IDs
+    if not prod_rows and marketplace and marketplace.lower() != 'all':
+        terms = domain_info.get('pcm_terms', ['retail'])
+        cat_terms = " OR ".join([f"category_name ILIKE '%{t}%'" for t in terms[:3]])
+        prod_terms = " OR ".join([f"product_name ILIKE '%{t}%'" for t in terms[:3]])
+        fallback_sql = f"""
+            SELECT id, marketplace_name, asin, product_name, brand, price, list_price, discount, stars, img_url, product_url, category_name
+            FROM product_master
+            WHERE marketplace_name ILIKE :marketplace AND ({cat_terms} OR {prod_terms})
+            ORDER BY ((id + :store_salt) % 999983) DESC
+            LIMIT :limit;
+        """
+        prod_rows = db.session.execute(text(fallback_sql), {
+            'marketplace': f"%{marketplace}%",
+            'store_salt': store_salt,
+            'limit': product_limit
+        }).fetchall()
 
     for p in prod_rows:
         products.append({
